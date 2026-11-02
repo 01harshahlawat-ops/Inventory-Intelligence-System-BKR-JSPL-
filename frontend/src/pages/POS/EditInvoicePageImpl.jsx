@@ -1075,7 +1075,7 @@ const EditInvoicePage = () => {
                         placeholder="Write HSN"
                         onChange={(e) => updateCartItem(index, 'hsn_sac', e.target.value)}
                         style={{
-                          width: '70px',
+                          width: '95px',
                           padding: '4px',
                           border: '1px solid #ccc',
                           borderRadius: '4px',

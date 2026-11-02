@@ -479,7 +479,7 @@
 }
 
 .priceInput {
-  width: 75px;
+  width: 100px;
   text-align: right;
   font-weight: 500;
 }
@@ -496,7 +496,7 @@
 }
 
 .hsnInput {
-  width: 65px;
+  width: 95px;
   text-align: center;
 }
 

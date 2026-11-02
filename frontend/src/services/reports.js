@@ -116,5 +116,22 @@ export const reportsService = {
       }
     });
     return normalizeResponse(response.data);
+  },
+  downloadPurchasesReport: async ({ vendorId, dateFrom, dateTo, format = 'excel' }) => {
+    const params = {
+      ...(vendorId ? { vendor_id: vendorId } : {}),
+      ...(dateFrom ? { date_from: dateFrom } : {}),
+      ...(dateTo ? { date_to: dateTo } : {}),
+      format
+    };
+    const response = await api.get('/api/reports/purchases/export', {
+      params,
+      responseType: 'blob'
+    });
+    return response;
+  },
+  getPurchasesReport: async (params) => {
+    const response = await api.get('/api/purchases', { params });
+    return normalizeResponse(response.data);
   }
 };

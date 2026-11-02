@@ -1274,10 +1274,10 @@ const POSPage = () => {
                 <thead>
                   <tr>
                     <th style={{ minWidth: '150px' }}>Product Details</th>
-                    <th style={{ width: '65px', textAlign: 'center' }}>HSN</th>
+                    <th style={{ width: '95px', textAlign: 'center' }}>HSN</th>
                     <th style={{ width: '45px', textAlign: 'center' }}>Qty</th>
                     <th style={{ width: '35px', textAlign: 'center' }}>Unit</th>
-                    <th style={{ width: '75px', textAlign: 'right' }}>Rate (₹)</th>
+                    <th style={{ width: '100px', textAlign: 'right' }}>Rate (₹)</th>
                     <th style={{ width: '55px', textAlign: 'right' }}>Disc %</th>
                     <th style={{ width: '65px', textAlign: 'right' }}>Disc (₹)</th>
                     <th style={{ width: '50px', textAlign: 'center' }}>GST %</th>

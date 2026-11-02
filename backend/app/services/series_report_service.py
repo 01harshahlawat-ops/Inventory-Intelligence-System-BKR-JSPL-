@@ -44,8 +44,6 @@ REPORT_COLUMNS = [
     "TAX-3(%)",
     "NET AMOUNT",
     "CD VALUE",
-    "AMOUNT (USER DEFINED RATE)",
-    "CREDIT",
     "CASH",
     "TAX REGION",
     "SCHEME(RS.)",
@@ -79,11 +77,50 @@ PURCHASE_REPORT_COLUMNS = [
     "ITEM CODE",
     "ITEM NAME",
     "PACK / SIZE",
+    "LOT NUMBER",
     "TOTAL QUANTITY",
     "GROSS AMOUNT",
     "NET AMOUNT",
     "TAX REGION",
     "TAX-1(%)",
+    "HSN CODE",
+    "HSN DESCRIPTION"
+]
+
+ACCOUNTANT_SALES_RETURN_COLUMNS = [
+    "SNO.",
+    "BILL NO.",
+    "BILL DATE",
+    "ITEM NAME",
+    "ITEM CODE",
+    "ADJUST/ITEM",
+    "PARTY NAME",
+    "GST NO.",
+    "GST STATE NAME",
+    "GST STATE CODE",
+    "PACK / SIZE",
+    "TAX (RS)",
+    "LOT NUMBER",
+    "TOTAL QUANTITY",
+    "RATE/UNIT",
+    "GROSS AMOUNT",
+    "CD(%)",
+    "FREIGHT",
+    "ADJUSTMENT",
+    "ADJUST/UNIT",
+    "TAX (%)",
+    "NET AMOUNT",
+    "CD VALUE",
+    "AMOUNT W/O TAX",
+    "CREDIT",
+    "CASH",
+    "SCHEME(RS.)",
+    "REMARKS-1",
+    "RCU MOBILE NO.",
+    "REMARKS-2",
+    "RCU DISCOUNT CARD NO.",
+    "RCU EMAIL ID",
+    "ORDER NO.",
     "HSN CODE",
     "HSN DESCRIPTION"
 ]
@@ -325,17 +362,18 @@ class SeriesReportService:
         file_format: str = "csv"
     ) -> Tuple[Union[str, bytes], str, str, int]:
         """
-        Shared exporter converting 47-column data rows into CSV or styled Excel (.xlsx).
+        Shared exporter converting data rows into CSV or styled Excel (.xlsx).
         """
+        num_cols = len(REPORT_COLUMNS)
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Row 1: 46 commas (47 empty columns)
-            writer.writerow([""] * 47)
-            # Row 2: Title repeated across 47 columns
-            writer.writerow([title_str] * 47)
-            # Row 3: 47 Column Headers
+            # Row 1: empty row
+            writer.writerow([""] * num_cols)
+            # Row 2: Title repeated across columns
+            writer.writerow([title_str] * num_cols)
+            # Row 3: Column Headers
             writer.writerow(REPORT_COLUMNS)
             # Data & Subtotals & Grand Total Rows
             for r in data_rows:
@@ -373,21 +411,21 @@ class SeriesReportService:
             ws.title = sheet_title[:31]
 
             # Row 1: empty row
-            ws.append([""] * 47)
+            ws.append([""] * num_cols)
 
             # Row 2: Title banner merged across columns
-            ws.append([title_str] * 47)
+            ws.append([title_str] * num_cols)
             title_cell = ws.cell(row=2, column=1)
             title_cell.font = Font(name="Calibri", size=11, bold=True, color="1E293B")
             title_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-            for c in range(1, 48):
+            for c in range(1, num_cols + 1):
                 ws.cell(row=2, column=c).fill = title_fill
 
             # Row 3: Header Row
             ws.append(REPORT_COLUMNS)
             header_fill = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
             header_font = Font(name="Calibri", size=10, bold=True, color="0F172A")
-            for c in range(1, 48):
+            for c in range(1, num_cols + 1):
                 cell = ws.cell(row=3, column=c)
                 cell.fill = header_fill
                 cell.font = header_font
@@ -402,16 +440,15 @@ class SeriesReportService:
             subtotal_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
             grand_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-            # Append Data Rows
             # Append Data Rows & track column widths simultaneously
-            col_widths = {c: len(str(REPORT_COLUMNS[c-1])) for c in range(1, 48)}
+            col_widths = {c: len(str(REPORT_COLUMNS[c-1])) for c in range(1, num_cols + 1)}
             current_row_idx = 4
             for r in data_rows:
                 ws.append(r)
-                is_subtotal = (r[1] == "BILL NO. WISE TOTALS")
-                is_grand = (r[1] == "GRAND TOTALS")
+                is_subtotal = (len(r) > 1 and r[1] == "BILL NO. WISE TOTALS")
+                is_grand = (len(r) > 1 and r[1] == "GRAND TOTALS")
 
-                for c_idx in range(1, 48):
+                for c_idx in range(1, min(len(r) + 1, num_cols + 1)):
                     cell = ws.cell(row=current_row_idx, column=c_idx)
                     cell.border = thin_border
                     if is_grand:
@@ -424,11 +461,11 @@ class SeriesReportService:
                         cell.font = Font(name="Calibri", size=10, color="334155")
 
                     # Right-align numeric columns
-                    if c_idx in (12, 13, 14, 15, 16, 17, 21, 22, 24, 25, 26, 38, 39):
+                    if c_idx in (12, 13, 14, 15, 16, 17, 21, 22, 24, 36, 37):
                         cell.alignment = Alignment(horizontal="right")
 
                     val_len = len(str(r[c_idx-1] or ''))
-                    if val_len > col_widths[c_idx]:
+                    if val_len > col_widths.get(c_idx, 0):
                         col_widths[c_idx] = val_len
 
                 current_row_idx += 1
@@ -640,7 +677,10 @@ class SeriesReportService:
                     AmazonLiveAllocation.allocated_qty > 0,
                     AmazonLiveAllocation.reconciled_qty > 0
                 ),
-                AmazonLiveAllocation.status == AllocationStatus.SHIPPED
+                AmazonLiveAllocation.invoice_number.isnot(None),
+                AmazonLiveAllocation.invoice_number != '',
+                ~AmazonLiveAllocation.invoice_number.ilike('%-C-%'),
+                ~AmazonLiveAllocation.invoice_number.ilike('CN-%')
             )
             if company_id and series_clean not in ("IN",):
                 has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
@@ -681,7 +721,11 @@ class SeriesReportService:
                 alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(date_from, datetime.min.time()))
             if date_to:
                 alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(date_to, datetime.max.time()))
-            amazon_allocations = alloc_query.order_by(alloc_date_col.asc(), AmazonLiveAllocation.id.asc()).all()
+            amazon_allocations = alloc_query.order_by(
+                alloc_date_col.asc(),
+                AmazonLiveAllocation.invoice_number.asc(),
+                AmazonLiveAllocation.id.asc()
+            ).all()
 
         d_from_str = date_from.strftime("%d/%m/%Y") if date_from else "01/10/2026"
         d_to_str = date_to.strftime("%d/%m/%Y") if date_to else datetime.utcnow().strftime("%d/%m/%Y")
@@ -824,30 +868,28 @@ class SeriesReportService:
                     tax_3,                                     # 20: TAX-3(%)
                     net_amt,                                   # 21: NET AMOUNT
                     "",                                        # 22: CD VALUE
-                    cost_amt,                                  # 23: AMOUNT (USER DEFINED RATE)
-                    credit_col,                                # 24: CREDIT
-                    cash_col,                                  # 25: CASH
-                    tax_region,                                # 26: TAX REGION
-                    "",                                        # 27: SCHEME(RS.)
-                    sale.payment_remarks or " ",               # 28: REMARKS-3
-                    sale.payment_reference or " ",             # 29: REMARKS-1
-                    " ",                                       # 30: REMARKS-2
-                    sale.customer_mobile or "",                # 31: RCU MOBILE NO.
-                    sale.customer_email or "",                 # 32: RCU EMAIL ID
-                    "",                                        # 33: ADJUST/UNIT
-                    "",                                        # 34: RCU DISCOUNT CARD NO.
-                    sale.buyer_order_no or " ",                # 35: ORDER NO.
-                    "",                                        # 36: GODOWN NAME
-                    pur_rate_str,                              # 37: PUR RATE
-                    rate_1_str,                                # 38: RATE-1
-                    "",                                        # 39: LOT PURCHASE RATE
-                    sale.dispatch_through or "",               # 40: TRANSPORT MODE
-                    addr2 or " ",                              # 41: CITY NAME
-                    addr1,                                     # 42: ADDRESS-1
-                    addr2,                                     # 43: ADDRESS-2
-                    addr3,                                     # 44: ADDRESS-3
-                    hsn_code,                                  # 45: HSN CODE
-                    hsn_desc                                   # 46: HSN DESCRIPTION
+                    cash_col,                                  # 23: CASH
+                    tax_region,                                # 24: TAX REGION
+                    "",                                        # 25: SCHEME(RS.)
+                    sale.payment_remarks or " ",               # 26: REMARKS-3
+                    sale.payment_reference or " ",             # 27: REMARKS-1
+                    " ",                                       # 28: REMARKS-2
+                    sale.customer_mobile or "",                # 29: RCU MOBILE NO.
+                    sale.customer_email or "",                 # 30: RCU EMAIL ID
+                    "",                                        # 31: ADJUST/UNIT
+                    "",                                        # 32: RCU DISCOUNT CARD NO.
+                    sale.buyer_order_no or " ",                # 33: ORDER NO.
+                    "",                                        # 34: GODOWN NAME
+                    pur_rate_str,                              # 35: PUR RATE
+                    rate_1_str,                                # 36: RATE-1
+                    "",                                        # 37: LOT PURCHASE RATE
+                    sale.dispatch_through or "",               # 38: TRANSPORT MODE
+                    addr2 or " ",                              # 39: CITY NAME
+                    addr1,                                     # 40: ADDRESS-1
+                    addr2,                                     # 41: ADDRESS-2
+                    addr3,                                     # 42: ADDRESS-3
+                    hsn_code,                                  # 43: HSN CODE
+                    hsn_desc                                   # 44: HSN DESCRIPTION
                 ]
                 data_rows.append(row)
 
@@ -877,11 +919,9 @@ class SeriesReportService:
                 "", "", "", "",                                # 17-20: (empty)
                 round(bill_net, 2),                            # 21: NET AMOUNT
                 "",                                            # 22: CD VALUE
-                round(bill_cost, 2) if bill_cost > 0 else "",  # 23: AMOUNT (USER DEFINED RATE)
-                round(bill_credit, 2) if bill_credit > 0 else "",# 24: CREDIT
-                round(bill_cash, 2) if bill_cash > 0 else "",  # 25: CASH
-                "", "", "", "", "", "", "", "", "", "",        # 26-35: (empty)
-                "", "", "", "", "", "", "", "", "", "", ""     # 36-46: (empty)
+                round(bill_cash, 2) if bill_cash > 0 else "",  # 23: CASH
+                "", "", "", "", "", "", "", "", "", "",        # 24-33: (empty)
+                "", "", "", "", "", "", "", "", "", "", ""     # 34-44: (empty)
             ]
             data_rows.append(subtotal_row)
 
@@ -1039,7 +1079,7 @@ class SeriesReportService:
                         state_name,
                         party_name, pack_size, qty, rate_unit, gross_amt,
                         "", "", igst if igst > 0 else "",
-                        "", "", "", tax_3, net_amt, "", cost_amt, "",
+                        "", "", "", tax_3, net_amt, "",
                         net_amt, "IGST", "", " ", f"AMZ-SYNC-{alloc.amazon_line_item_id or ''}", " ",
                         "", "", "", "", order_id, godown_name,
                         pur_rate_str,
@@ -1060,7 +1100,7 @@ class SeriesReportService:
                     "", "BILL NO. WISE TOTALS",
                     "", "", "", "", "", "", "", "", "",
                     b_qty, "", round(b_gross, 2), "", "", round(b_igst, 2) if b_igst > 0 else "",
-                    "", "", "", "", round(b_net, 2), "", round(b_cost, 2) if b_cost > 0 else "", "",
+                    "", "", "", "", round(b_net, 2), "",
                     round(b_net, 2), "", "", "", "", "", "", "", "", "", "",
                     "", "", "", "", "", "", "", "", "", "", ""
                 ]
@@ -1088,11 +1128,9 @@ class SeriesReportService:
                 "", "", "", "",                                    # 17-20: (empty)
                 round(grand_net, 2),                               # 21: NET AMOUNT
                 "",                                                # 22: CD VALUE
-                round(grand_cost, 2) if grand_cost > 0 else "",    # 23: AMOUNT (USER DEFINED RATE)
-                round(grand_credit, 2) if grand_credit > 0 else "",# 24: CREDIT
-                round(grand_cash, 2) if grand_cash > 0 else "",    # 25: CASH
-                "", "", "", "", "", "", "", "", "", "",            # 26-35: (empty)
-                "", "", "", "", "", "", "", "", "", "", ""         # 36-46: (empty)
+                round(grand_cash, 2) if grand_cash > 0 else "",    # 23: CASH
+                "", "", "", "", "", "", "", "", "", "",            # 24-33: (empty)
+                "", "", "", "", "", "", "", "", "", "", ""         # 34-44: (empty)
             ]
             data_rows.append(grand_total_row)
 
@@ -1129,11 +1167,12 @@ class SeriesReportService:
         report_type_label: str,
         file_format: str = "csv"
     ) -> Tuple[Union[str, bytes], str, str, int]:
+        num_cols = len(PURCHASE_REPORT_COLUMNS)
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow([""] * 15)
-            writer.writerow([title_str] * 15)
+            writer.writerow([""] * num_cols)
+            writer.writerow([title_str] * num_cols)
             writer.writerow(PURCHASE_REPORT_COLUMNS)
             for r in data_rows:
                 writer.writerow(r)
@@ -1162,18 +1201,18 @@ class SeriesReportService:
             ws = wb.active
             ws.title = sheet_title[:31]
 
-            ws.append([""] * 15)
-            ws.append([title_str] * 15)
+            ws.append([""] * num_cols)
+            ws.append([title_str] * num_cols)
             title_cell = ws.cell(row=2, column=1)
-            title_cell.font = Font(name="Calibri", size=11, bold=True, color="1E293B")
+            title_cell.font = Font(name="Tahoma", size=12, bold=True, color="1E293B")
             title_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-            for c in range(1, 16):
+            for c in range(1, num_cols + 1):
                 ws.cell(row=2, column=c).fill = title_fill
 
             ws.append(PURCHASE_REPORT_COLUMNS)
             header_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
-            header_font = Font(name="Calibri", size=10, bold=True, color="0F172A")
-            for c in range(1, 16):
+            header_font = Font(name="Courier New", size=8, bold=True, color="0F172A")
+            for c in range(1, num_cols + 1):
                 cell = ws.cell(row=3, column=c)
                 cell.fill = header_fill
                 cell.font = header_font
@@ -1187,26 +1226,26 @@ class SeriesReportService:
             )
             grand_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-            col_widths = {c: len(str(PURCHASE_REPORT_COLUMNS[c-1])) for c in range(1, 16)}
+            col_widths = {c: len(str(PURCHASE_REPORT_COLUMNS[c-1])) for c in range(1, num_cols + 1)}
             current_row_idx = 4
             for r in data_rows:
                 ws.append(r)
-                is_grand = (r[0] == "" and r[8] != "")
+                is_grand = (len(r) > 9 and r[0] == "" and str(r[9]).strip() != "")
 
-                for c_idx in range(1, 16):
+                for c_idx in range(1, min(len(r) + 1, num_cols + 1)):
                     cell = ws.cell(row=current_row_idx, column=c_idx)
                     cell.border = thin_border
                     if is_grand:
-                        cell.font = Font(name="Calibri", size=10, bold=True, color="92400E")
+                        cell.font = Font(name="Tahoma", size=10, bold=True, color="92400E")
                         cell.fill = grand_fill
                     else:
-                        cell.font = Font(name="Calibri", size=10, color="334155")
+                        cell.font = Font(name="Tahoma", size=10, color="334155")
 
-                    if c_idx in (9, 10, 11, 13):
+                    if c_idx in (10, 11, 12, 14):
                         cell.alignment = Alignment(horizontal="right")
 
                     val_len = len(str(r[c_idx-1] or ''))
-                    if val_len > col_widths[c_idx]:
+                    if val_len > col_widths.get(c_idx, 0):
                         col_widths[c_idx] = val_len
 
                 current_row_idx += 1
@@ -1429,13 +1468,14 @@ class SeriesReportService:
                     item_code,                                 # 5: ITEM CODE
                     item_name,                                 # 6: ITEM NAME
                     pack_size,                                 # 7: PACK / SIZE
-                    qty,                                       # 8: TOTAL QUANTITY
-                    gross_amt,                                 # 9: GROSS AMOUNT
-                    net_amt,                                   # 10: NET AMOUNT
-                    tax_region,                                # 11: TAX REGION
-                    gst_rate,                                  # 12: TAX-1(%)
-                    hsn_code,                                  # 13: HSN CODE
-                    hsn_desc                                   # 14: HSN DESCRIPTION
+                    "1",                                       # 8: LOT NUMBER
+                    qty,                                       # 9: TOTAL QUANTITY
+                    gross_amt,                                 # 10: GROSS AMOUNT
+                    net_amt,                                   # 11: NET AMOUNT
+                    tax_region,                                # 12: TAX REGION
+                    gst_rate,                                  # 13: TAX-1(%)
+                    hsn_code,                                  # 14: HSN CODE
+                    hsn_desc                                   # 15: HSN DESCRIPTION
                 ]
                 data_rows.append(row)
 
@@ -1445,7 +1485,7 @@ class SeriesReportService:
 
         if sno > 0:
             grand_total_row = [
-                "", "", "", "", "", "", "", "",
+                "", "", "", "", "", "", "", "", "",
                 grand_qty,
                 round(grand_gross, 2),
                 round(grand_net, 2),
@@ -1580,177 +1620,555 @@ class SeriesReportService:
         )
 
     @staticmethod
-    def generate_amazon_returns_report(
+    def _export_sales_return_dataset(
+        db: Session,
+        company_id: Optional[int],
+        data_rows: List[List[Any]],
+        title_str: str,
+        filename_base: str,
+        sheet_title: str = "Sales_Returns",
+        report_type_label: str = "Sales Returns",
+        file_format: str = "excel"
+    ) -> Tuple[Union[str, bytes], str, str, int]:
+        """
+        Shared exporter converting 35-column sales return data rows into CSV or styled Excel (.xlsx).
+        Matches exact layout of SALE RETURN FORMAT.xlsx.
+        """
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        num_cols = len(ACCOUNTANT_SALES_RETURN_COLUMNS)
+        if file_format.lower() == "csv":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow([""] * num_cols)
+            writer.writerow([title_str] * num_cols)
+            writer.writerow(ACCOUNTANT_SALES_RETURN_COLUMNS)
+            for r in data_rows:
+                writer.writerow(r)
+            content = output.getvalue()
+            filename = f"{filename_base}.csv"
+            media_type = "text/csv"
+            filepath = os.path.join(REPORTS_DIR, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            if company_id:
+                rep_hist = ReportHistory(
+                    company_id=company_id,
+                    report_type=report_type_label,
+                    file_path=filepath,
+                    download_link=f"/api/reports/download/{filename}"
+                )
+                db.add(rep_hist)
+                db.commit()
+            return content, filename, media_type, len(data_rows)
+
+        # Excel (.xlsx) formatting matching SALE RETURN FORMAT.xlsx
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = sheet_title[:31]
+
+        # Row 1: empty row
+        ws.append([""] * num_cols)
+
+        # Row 2: Title row
+        ws.append([title_str] * num_cols)
+        ws.row_dimensions[2].height = 20
+        title_font = Font(name="Tahoma", size=10, bold=False, color="000000")
+        for c in range(1, num_cols + 1):
+            cell = ws.cell(row=2, column=c)
+            cell.font = title_font
+
+        # Row 3: Header Row (Courier New 8pt bold, fill #F0F0F0)
+        ws.append(ACCOUNTANT_SALES_RETURN_COLUMNS)
+        ws.row_dimensions[3].height = 22
+        header_fill = PatternFill(start_color="FFF0F0F0", end_color="FFF0F0F0", fill_type="solid")
+        header_font = Font(name="Courier New", size=8, bold=True, color="000000")
+        thin_border = Border(
+            left=Side(style="thin", color="D1D5DB"),
+            right=Side(style="thin", color="D1D5DB"),
+            top=Side(style="thin", color="D1D5DB"),
+            bottom=Side(style="thin", color="D1D5DB")
+        )
+        for c in range(1, num_cols + 1):
+            cell = ws.cell(row=3, column=c)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        # Styles for data, subtotals, and grand totals
+        data_font = Font(name="Tahoma", size=10, color="000000")
+        subtotal_font = Font(name="Tahoma", size=10, bold=True, color="0000FF")
+        subtotal_fill = PatternFill(start_color="FFDEFEF0", end_color="FFDEFEF0", fill_type="solid")
+        grand_font = Font(name="Tahoma", size=10, bold=True, color="FFFFFF00")
+        grand_fill = PatternFill(start_color="FF0000FF", end_color="FF0000FF", fill_type="solid")
+
+        col_widths = {c: len(str(ACCOUNTANT_SALES_RETURN_COLUMNS[c-1])) for c in range(1, num_cols + 1)}
+        current_row_idx = 4
+
+        for r in data_rows:
+            ws.append(r)
+            is_subtotal = (len(r) > 1 and str(r[1]).strip() == "BILL NO. WISE TOTALS")
+            is_grand = (len(r) > 1 and str(r[1]).strip() == "GRAND TOTALS")
+
+            for c_idx in range(1, min(len(r) + 1, num_cols + 1)):
+                cell = ws.cell(row=current_row_idx, column=c_idx)
+                cell.border = thin_border
+
+                if is_grand:
+                    cell.font = grand_font
+                    cell.fill = grand_fill
+                elif is_subtotal:
+                    cell.font = subtotal_font
+                    cell.fill = subtotal_fill
+                else:
+                    cell.font = data_font
+
+                # Numeric right-alignment: Col 12, 14, 15, 16, 21, 22, 24, 25
+                if c_idx in (12, 14, 15, 16, 21, 22, 24, 25):
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                else:
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+
+                val_len = len(str(r[c_idx-1] or ""))
+                if val_len > col_widths.get(c_idx, 0):
+                    col_widths[c_idx] = val_len
+
+            current_row_idx += 1
+
+        for col_idx, width in col_widths.items():
+            col_letter = get_column_letter(col_idx)
+            ws.column_dimensions[col_letter].width = min(max(width + 3, 10), 55)
+
+        ws.freeze_panes = "A4"
+
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        content_bytes = out.getvalue()
+        filename = f"{filename_base}.xlsx"
+
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filepath = os.path.join(REPORTS_DIR, filename)
+        with open(filepath, "wb") as f:
+            f.write(content_bytes)
+        if company_id:
+            rep_hist = ReportHistory(
+                company_id=company_id,
+                report_type=report_type_label,
+                file_path=filepath,
+                download_link=f"/api/reports/download/{filename}"
+            )
+            db.add(rep_hist)
+            db.commit()
+        return content_bytes, filename, media_type, len(data_rows)
+
+    @staticmethod
+    def generate_accountant_sales_returns_report(
         db: Session,
         company_id: Optional[int] = None,
         date_from: Optional[Union[date, str]] = None,
         date_to: Optional[Union[date, str]] = None,
-        file_format: str = "csv"
+        returns_filter: str = "all",
+        file_format: str = "excel"
     ) -> Tuple[Union[str, bytes], str, str, int]:
         """
-        Generates the Accountant Amazon Returns Register in the exact 47-column format.
+        Generates the unified 35-column Sales Return Register for Accountant matching SALE RETURN FORMAT.xlsx.
+        Combines POS Billing Returns (SR-xx) and Amazon Returns (GGSR-xx) with BILL NO. WISE TOTALS and GRAND TOTALS.
+        Works seamlessly for JSPL (Company 3) and BKR (Company 2).
         """
         date_from = parse_date_param(date_from)
         date_to = parse_date_param(date_to)
-        query = db.query(AmazonReturn)
-        if company_id:
-            query = query.filter(AmazonReturn.company_id == company_id)
-        if date_from:
-            query = query.filter(func.coalesce(AmazonReturn.received_at, AmazonReturn.requested_at, AmazonReturn.created_at) >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            query = query.filter(func.coalesce(AmazonReturn.received_at, AmazonReturn.requested_at, AmazonReturn.created_at) <= datetime.combine(date_to, datetime.max.time()))
-
-        returns = query.order_by(func.coalesce(AmazonReturn.received_at, AmazonReturn.created_at).asc(), AmazonReturn.id.asc()).all()
-
         d_from_str = date_from.strftime("%d/%m/%Y") if date_from else "01/10/2026"
         d_to_str = date_to.strftime("%d/%m/%Y") if date_to else datetime.utcnow().strftime("%d/%m/%Y")
-        title_str = f"AMAZON RETURNS REPORT FOR ACCOUNTANT From {d_from_str} to {d_to_str}"
+        title_str = f"SALE REPORT FOR ACCOUNTANT From {d_from_str} to {d_to_str}"
 
-        # Pre-cache products and state hubs in memory
-        prod_query = db.query(Product)
-        if company_id:
-            prod_query = prod_query.filter(Product.company_id == company_id)
-        all_prods = prod_query.all()
+        # State GST code mapping
+        STATE_CODES = {
+            "JAMMU AND KASHMIR": ("Jammu and Kashmir", "01"),
+            "HIMACHAL PRADESH": ("Himachal Pradesh", "02"),
+            "PUNJAB": ("Punjab", "03"),
+            "CHANDIGARH": ("Chandigarh", "04"),
+            "UTTARAKHAND": ("Uttarakhand", "05"),
+            "HARYANA": ("Haryana", "06"),
+            "DELHI": ("Delhi", "07"),
+            "RAJASTHAN": ("Rajasthan", "08"),
+            "UTTAR PRADESH": ("Uttar Pradesh", "09"),
+            "BIHAR": ("Bihar", "10"),
+            "SIKKIM": ("Sikkim", "11"),
+            "ARUNACHAL PRADESH": ("Arunachal Pradesh", "12"),
+            "NAGALAND": ("Nagaland", "13"),
+            "MANIPUR": ("Manipur", "14"),
+            "MIZORAM": ("Mizoram", "15"),
+            "TRIPURA": ("Tripura", "16"),
+            "MEGHALAYA": ("Meghalaya", "17"),
+            "ASSAM": ("Assam", "18"),
+            "WEST BENGAL": ("West Bengal", "19"),
+            "JHARKHAND": ("Jharkhand", "20"),
+            "ODISHA": ("Odisha", "21"),
+            "CHHATTISGARH": ("Chhattisgarh", "22"),
+            "MADHYA PRADESH": ("Madhya Pradesh", "23"),
+            "GUJARAT": ("Gujarat", "24"),
+            "DADRA AND NAGAR HAVELI AND DAMAN AND DIU": ("Dadra and Nagar Haveli", "26"),
+            "MAHARASHTRA": ("Maharashtra", "27"),
+            "ANDHRA PRADESH": ("Andhra Pradesh", "28"),
+            "KARNATAKA": ("Karnataka", "29"),
+            "GOA": ("Goa", "30"),
+            "LAKSHADWEEP": ("Lakshadweep", "31"),
+            "KERALA": ("Kerala", "32"),
+            "TAMIL NADU": ("Tamil Nadu", "33"),
+            "PUDUCHERRY": ("Puducherry", "34"),
+            "ANDAMAN AND NICOBAR ISLANDS": ("Andaman and Nicobar Island", "35"),
+            "ANDAMAN AND NICOBAR ISLAND": ("Andaman and Nicobar Island", "35"),
+            "TELANGANA": ("Telangana", "36"),
+            "LADAKH": ("Ladakh", "38"),
+        }
+
+        def get_state_info(raw_state: Optional[str]) -> Tuple[str, str]:
+            if not raw_state:
+                return "Chandigarh", "04"
+            clean = raw_state.strip().upper()
+            if clean in STATE_CODES:
+                return STATE_CODES[clean]
+            for k, (sname, scode) in STATE_CODES.items():
+                if k in clean or clean in k:
+                    return sname, scode
+            return raw_state.strip().title(), "00"
+
+        # Pre-cache catalog products
+        all_prods = db.query(Product).all()
         prod_map = {p.sku.upper(): p for p in all_prods if p.sku}
-        hub_map = {h.id: h for h in db.query(StateHub).all()}
-
-        central_hub = None
-        if company_id == 2:
-            central_hub = hub_map.get(13)
-        elif company_id == 3:
-            central_hub = hub_map.get(12)
-        else:
-            central_hub = next((h for h in hub_map.values() if "CHANDIGARH" in (h.state or "").upper()), None)
-
-        return_state = central_hub.state.strip().title() if (central_hub and central_hub.state) else "Chandigarh"
-        ret_addr1 = central_hub.address if (central_hub and central_hub.address) else "Plot no: 150, Industrial & Business Park-2"
-        ret_addr2 = central_hub.city if (central_hub and central_hub.city) else "Chandigarh"
-        ret_addr3 = f"{return_state} - 160002"
 
         data_rows: List[List[Any]] = []
         sno = 0
+        grand_tax = 0.0
         grand_qty = 0
         grand_gross = 0.0
-        grand_igst = 0.0
         grand_net = 0.0
 
-        for r in returns:
-            sno += 1
-            bill_no = r.amazon_return_id or r.amazon_order_id or f"AMZ-RET-{r.id}"
-            r_date = r.received_at or r.requested_at or r.created_at
-            bill_date = r_date.strftime("%d/%m/%Y") if r_date else ""
-            
-            prod = prod_map.get(r.sku)
-            item_code = r.sku
-            item_name = r.product_name or (prod.name if prod else r.sku)
-            hsn_code = prod.hsn if prod else ""
-            pack_size = prod.unit if prod else "PCS"
-            qty = r.quantity or 1
+        include_pos = returns_filter in ("all", "pos", "billing")
+        include_amazon = returns_filter in ("all", "amazon")
 
-            gst_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
-            group_tax = f"GST {int(gst_rate) if gst_rate.is_integer() else gst_rate}%"
+        # 1. POS SALES RETURNS
+        if include_pos:
+            pos_q = db.query(SalesReturn)
+            if company_id:
+                pos_q = pos_q.filter(SalesReturn.company_id == company_id)
+            if date_from:
+                pos_q = pos_q.filter(func.coalesce(SalesReturn.return_date, SalesReturn.created_at) >= datetime.combine(date_from, datetime.min.time()))
+            if date_to:
+                pos_q = pos_q.filter(func.coalesce(SalesReturn.return_date, SalesReturn.created_at) <= datetime.combine(date_to, datetime.max.time()))
 
-            pur_rate = float(prod.item_rate if prod and prod.item_rate else 0.0)
-            selling_price = pur_rate * 1.35 if pur_rate > 0 else 500.0
-            rate_unit = round(selling_price / (1 + (gst_rate / 100.0)), 2)
-            gross_amt = round(rate_unit * qty, 2)
-            igst = round(gross_amt * (gst_rate / 100.0), 2)
-            net_amt = round(gross_amt + igst, 2)
+            pos_q = pos_q.options(
+                selectinload(SalesReturn.items).selectinload(SalesReturnItem.product),
+                selectinload(SalesReturn.sale)
+            )
+            pos_returns = pos_q.order_by(func.coalesce(SalesReturn.return_date, SalesReturn.created_at).asc(), SalesReturn.id.asc()).all()
 
-            hsn_desc = prod.category if prod and prod.category else "Other"
+            for ret in pos_returns:
+                items = ret.items or []
+                if not items:
+                    continue
 
-            row = [
-                sno,                                       # 0: SNO.
-                bill_no,                                   # 1: BILL NO.
-                bill_date,                                 # 2: BILL DATE
-                item_code,                                 # 3: ITEM CODE
-                item_name,                                 # 4: ITEM NAME
-                hsn_code,                                  # 5: hsn code
-                group_tax,                                 # 6: GROUP11.GRP1
-                "",                                        # 7: GST NO.
-                return_state,                              # 8: GST STATE NAME
-                "Amazon Retail Customer",                  # 9: PARTY NAME
-                pack_size,                                 # 10: PACK / SIZE
-                qty,                                       # 11: SALE QUANTITY (Returned Qty)
-                rate_unit,                                 # 12: RATE/UNIT
-                gross_amt,                                 # 13: GROSS AMOUNT
-                "",                                        # 14: TOTAL SGST AMOUNT
-                "",                                        # 15: TOTAL CGST AMOUNT
-                igst if igst > 0 else "",                  # 16: TOTAL IGST AMOUNT
-                "", "", "", gst_rate,                      # 17-20: TD, CD, Freight, Tax-3%
-                net_amt,                                   # 21: NET AMOUNT
-                "",                                        # 22: CD VALUE
-                round(pur_rate * qty, 2) if pur_rate > 0 else "", # 23: AMOUNT (USER DEFINED RATE)
-                net_amt,                                   # 24: CREDIT (Return Credit Note)
-                "",                                        # 25: CASH
-                "IGST",                                    # 26: TAX REGION
-                "",                                        # 27: SCHEME(RS.)
-                f"Status: {r.return_status or 'Received'}",# 28: REMARKS-3
-                f"Inspection: {r.inspection_status or 'Pending'}", # 29: REMARKS-1
-                r.inspection_notes or " ",                 # 30: REMARKS-2
-                "", "", "", "",                            # 31-34: mobile, email, adjust, disc
-                r.amazon_order_id or " ",                  # 35: ORDER NO.
-                "Amazon AFN Return Hub",                   # 36: GODOWN NAME
-                f"{round(pur_rate, 2):g}" if pur_rate > 0 else "", # 37: PUR RATE
-                f"{pur_rate:.4f}" if pur_rate > 0 else "", # 38: RATE-1
-                "",                                        # 39: LOT PURCHASE RATE
-                "Amazon Return Logistics",                 # 40: TRANSPORT MODE
-                ret_addr2,                                 # 41: CITY NAME
-                ret_addr1,                                 # 42: ADDRESS-1
-                ret_addr2, ret_addr3,                      # 43-44: ADDRESS-2, 3
-                hsn_code,                                  # 45: HSN CODE
-                hsn_desc                                   # 46: HSN DESCRIPTION
-            ]
-            data_rows.append(row)
+                bill_no = ret.return_number or f"SR-{ret.id}"
+                r_date = ret.return_date or ret.created_at
+                bill_date = r_date.strftime("%d/%m/%Y") if r_date else ""
+                party_name = (ret.customer_name or "Retail Customer A/C").ljust(70)
+                original_bill = ret.sale.bill_number if (ret.sale and ret.sale.bill_number) else (f"JGST-{ret.sale_id}" if ret.sale_id else "")
 
-            # Subtotal row
-            subtotal_row = [
-                "", "BILL NO. WISE TOTALS",
-                "", "", "", "", "", "", "", "", "",
-                qty, "", gross_amt, "", "", igst if igst > 0 else "",
-                "", "", "", "", net_amt, "", "", net_amt, "",
-                "", "", "", "", "", "", "", "", "", "",
-                "", "", "", "", "", "", "", "", "", "", ""
-            ]
-            data_rows.append(subtotal_row)
+                # State
+                sale_state = ret.sale.customer_state if (ret.sale and ret.sale.customer_state) else "Chandigarh"
+                gst_state_name, gst_state_code = get_state_info(sale_state)
+                gst_no = (ret.sale.customer_gstin if (ret.sale and ret.sale.customer_gstin) else "") or " "
 
-            grand_qty += qty
-            grand_gross += gross_amt
-            grand_igst += igst
-            grand_net += net_amt
+                b_tax = 0.0
+                b_qty = 0
+                b_gross = 0.0
+                b_net = 0.0
+
+                for it in items:
+                    sno += 1
+                    item_code = it.sku_snapshot or ""
+                    prod = prod_map.get(item_code.upper())
+                    item_name = it.product_name_snapshot or (prod.name if prod else item_code)
+                    pack_size = it.unit_snapshot or (prod.unit if prod else "PCS")
+                    qty = it.returned_quantity or 1
+                    rate_unit = float(it.unit_price or 0.0)
+                    gross_amt = round(qty * rate_unit, 2)
+                    gst_rate = float(it.tax_rate or (prod.default_gst_rate if prod else 18.0) or 18.0)
+                    tax_amt = round(gross_amt * (gst_rate / 100.0), 2)
+                    net_amt = round(float(it.total_price or (gross_amt + tax_amt)), 2)
+                    hsn_code = it.hsn_snapshot or (prod.hsn if prod else "84248200")
+                    hsn_desc = prod.category if prod and prod.category else "Agricultural or horticultural"
+
+                    # Format row in exact 35 columns
+                    row = [
+                        sno,                                            # 0: SNO.
+                        bill_no,                                        # 1: BILL NO.
+                        bill_date,                                      # 2: BILL DATE
+                        item_name,                                      # 3: ITEM NAME
+                        item_code,                                      # 4: ITEM CODE
+                        None,                                           # 5: ADJUST/ITEM
+                        party_name,                                     # 6: PARTY NAME
+                        gst_no,                                         # 7: GST NO.
+                        gst_state_name,                                 # 8: GST STATE NAME
+                        gst_state_code,                                 # 9: GST STATE CODE
+                        pack_size,                                      # 10: PACK / SIZE
+                        -abs(tax_amt),                                  # 11: TAX (RS)
+                        "1",                                            # 12: LOT NUMBER
+                        -abs(qty),                                      # 13: TOTAL QUANTITY
+                        round(rate_unit, 2),                            # 14: RATE/UNIT
+                        -abs(gross_amt),                                # 15: GROSS AMOUNT
+                        None,                                           # 16: CD(%)
+                        None,                                           # 17: FREIGHT
+                        None,                                           # 18: ADJUSTMENT
+                        None,                                           # 19: ADJUST/UNIT
+                        gst_rate,                                       # 20: TAX (%)
+                        -abs(net_amt),                                  # 21: NET AMOUNT
+                        None,                                           # 22: CD VALUE
+                        -abs(gross_amt),                                # 23: AMOUNT W/O TAX
+                        -abs(net_amt),                                  # 24: CREDIT
+                        None,                                           # 25: CASH
+                        None,                                           # 26: SCHEME(RS.)
+                        original_bill,                                  # 27: REMARKS-1
+                        ret.sale.customer_phone if ret.sale else None,  # 28: RCU MOBILE NO.
+                        " ",                                            # 29: REMARKS-2
+                        None,                                           # 30: RCU DISCOUNT CARD NO.
+                        None,                                           # 31: RCU EMAIL ID
+                        " ",                                            # 32: ORDER NO.
+                        hsn_code,                                       # 33: HSN CODE
+                        hsn_desc                                        # 34: HSN DESCRIPTION
+                    ]
+                    data_rows.append(row)
+
+                    b_tax += tax_amt
+                    b_qty += qty
+                    b_gross += gross_amt
+                    b_net += net_amt
+
+                # Subtotal row for this bill
+                subtotal_row = [
+                    None,                                           # 0: SNO.
+                    "BILL NO. WISE TOTALS",                         # 1: BILL NO.
+                    None, None, None, None, None, None, None, None, None, # 2-10
+                    -round(b_tax, 2),                               # 11: TAX (RS)
+                    None,                                           # 12: LOT NUMBER
+                    -b_qty,                                         # 13: TOTAL QUANTITY
+                    None,                                           # 14: RATE/UNIT
+                    -round(b_gross, 2),                             # 15: GROSS AMOUNT
+                    None, None, None, None, None,                   # 16-20
+                    -round(b_net, 2),                               # 21: NET AMOUNT
+                    None,                                           # 22: CD VALUE
+                    -round(b_gross, 2),                             # 23: AMOUNT W/O TAX
+                    -round(b_net, 2),                               # 24: CREDIT
+                    None, None, None, None, None, None, None, None, None, None # 25-34
+                ]
+                data_rows.append(subtotal_row)
+
+                grand_tax += b_tax
+                grand_qty += b_qty
+                grand_gross += b_gross
+                grand_net += b_net
+
+        # 2. AMAZON RETURNS
+        if include_amazon:
+            # Query returned allocations or amazon returns
+            alloc_date_col = func.coalesce(
+                AmazonLiveAllocation.shipment_date,
+                AmazonLiveAllocation.invoice_date,
+                AmazonLiveAllocation.order_date,
+                AmazonLiveAllocation.created_at
+            )
+            amz_q = db.query(AmazonLiveAllocation).filter(
+                AmazonLiveAllocation.status == AllocationStatus.RETURNED,
+                AmazonLiveAllocation.invoice_number.isnot(None),
+                AmazonLiveAllocation.invoice_number != ""
+            )
+            if company_id:
+                amz_q = amz_q.filter(AmazonLiveAllocation.company_id == company_id)
+            if date_from:
+                amz_q = amz_q.filter(alloc_date_col >= datetime.combine(date_from, datetime.min.time()))
+            if date_to:
+                amz_q = amz_q.filter(alloc_date_col <= datetime.combine(date_to, datetime.max.time()))
+
+            amz_returns = amz_q.order_by(alloc_date_col.asc(), AmazonLiveAllocation.id.asc()).all()
+
+            # Sequence counter for GGSR numbers
+            ggsr_counter = 240
+
+            for alloc in amz_returns:
+                sno += 1
+                ggsr_counter += 1
+                bill_no = f"GGSR-{ggsr_counter}"
+
+                r_dt = alloc.shipment_date or alloc.invoice_date or alloc.order_date or alloc.created_at
+                bill_date = r_dt.strftime("%d/%m/%Y") if r_dt else ""
+
+                state_raw = alloc.state_name or "Haryana"
+                gst_state_name, gst_state_code = get_state_info(state_raw)
+                state_abbr = (gst_state_name[:3] if len(gst_state_name) >= 3 else "HRY").upper()
+                if gst_state_name.upper() == "HARYANA":
+                    state_abbr = "HRY"
+                elif gst_state_name.upper() == "UTTARAKHAND":
+                    state_abbr = "UT"
+                elif gst_state_name.upper() == "RAJASTHAN":
+                    state_abbr = "RJ"
+                elif gst_state_name.upper() == "TAMIL NADU":
+                    state_abbr = "TN"
+                elif gst_state_name.upper() == "ARUNACHAL PRADESH":
+                    state_abbr = "AR"
+                elif gst_state_name.upper() == "SIKKIM":
+                    state_abbr = "SK"
+                elif "ANDAMAN" in gst_state_name.upper():
+                    state_abbr = "AN"
+
+                party_name = f"AMAZON SELLER PORTAL CUSTOMER ({state_abbr})".ljust(70)
+                original_inv = alloc.invoice_number or ""
+
+                item_code = alloc.sku or ""
+                prod = prod_map.get(item_code.upper())
+                item_name = prod.name if prod else item_code
+                pack_size = prod.unit if (prod and prod.unit) else (prod.brand if (prod and prod.brand) else "PCS")
+                qty = alloc.allocated_qty or alloc.reconciled_qty or 1
+
+                net_amt = float(alloc.net_amount or 0.0)
+                gross_amt = float(alloc.gross_amount or 0.0)
+                tax_amt = float(alloc.tax_amount or 0.0)
+
+                gst_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
+                if gross_amt > 0 and tax_amt > 0:
+                    calculated_rate = round((tax_amt / gross_amt) * 100)
+                    if calculated_rate in (5, 12, 18, 28):
+                        gst_rate = calculated_rate
+
+                if gross_amt == 0.0 and net_amt > 0.0:
+                    gross_amt = round(net_amt / (1 + (gst_rate / 100.0)), 2)
+                    tax_amt = round(net_amt - gross_amt, 2)
+                elif net_amt == 0.0 and gross_amt > 0.0:
+                    tax_amt = round(gross_amt * (gst_rate / 100.0), 2)
+                    net_amt = round(gross_amt + tax_amt, 2)
+
+                rate_unit = round(gross_amt / qty, 2) if qty > 0 else gross_amt
+                hsn_code = alloc.hsn_code or (prod.hsn if prod else "84248200")
+                hsn_desc = prod.category if prod and prod.category else "Agricultural or horticultural"
+
+                row = [
+                    sno,                                            # 0: SNO.
+                    bill_no,                                        # 1: BILL NO.
+                    bill_date,                                      # 2: BILL DATE
+                    item_name,                                      # 3: ITEM NAME
+                    item_code,                                      # 4: ITEM CODE
+                    None,                                           # 5: ADJUST/ITEM
+                    party_name,                                     # 6: PARTY NAME
+                    alloc.customer_gstin or " ",                    # 7: GST NO.
+                    gst_state_name,                                 # 8: GST STATE NAME
+                    gst_state_code,                                 # 9: GST STATE CODE
+                    pack_size,                                      # 10: PACK / SIZE
+                    -abs(tax_amt),                                  # 11: TAX (RS)
+                    "1",                                            # 12: LOT NUMBER
+                    -abs(qty),                                      # 13: TOTAL QUANTITY
+                    round(rate_unit, 2),                            # 14: RATE/UNIT
+                    -abs(gross_amt),                                # 15: GROSS AMOUNT
+                    None,                                           # 16: CD(%)
+                    None,                                           # 17: FREIGHT
+                    None,                                           # 18: ADJUSTMENT
+                    None,                                           # 19: ADJUST/UNIT
+                    gst_rate,                                       # 20: TAX (%)
+                    -abs(net_amt),                                  # 21: NET AMOUNT
+                    None,                                           # 22: CD VALUE
+                    -abs(gross_amt),                                # 23: AMOUNT W/O TAX
+                    -abs(net_amt),                                  # 24: CREDIT
+                    None,                                           # 25: CASH
+                    None,                                           # 26: SCHEME(RS.)
+                    original_inv,                                   # 27: REMARKS-1
+                    None,                                           # 28: RCU MOBILE NO.
+                    " ",                                            # 29: REMARKS-2
+                    None,                                           # 30: RCU DISCOUNT CARD NO.
+                    None,                                           # 31: RCU EMAIL ID
+                    " ",                                            # 32: ORDER NO.
+                    hsn_code,                                       # 33: HSN CODE
+                    hsn_desc                                        # 34: HSN DESCRIPTION
+                ]
+                data_rows.append(row)
+
+                # Subtotal row for this return
+                subtotal_row = [
+                    None,                                           # 0: SNO.
+                    "BILL NO. WISE TOTALS",                         # 1: BILL NO.
+                    None, None, None, None, None, None, None, None, None, # 2-10
+                    -round(tax_amt, 2),                             # 11: TAX (RS)
+                    None,                                           # 12: LOT NUMBER
+                    -qty,                                           # 13: TOTAL QUANTITY
+                    None,                                           # 14: RATE/UNIT
+                    -round(gross_amt, 2),                           # 15: GROSS AMOUNT
+                    None, None, None, None, None,                   # 16-20
+                    -round(net_amt, 2),                             # 21: NET AMOUNT
+                    None,                                           # 22: CD VALUE
+                    -round(gross_amt, 2),                           # 23: AMOUNT W/O TAX
+                    -round(net_amt, 2),                             # 24: CREDIT
+                    None, None, None, None, None, None, None, None, None, None # 25-34
+                ]
+                data_rows.append(subtotal_row)
+
+                grand_tax += tax_amt
+                grand_qty += qty
+                grand_gross += gross_amt
+                grand_net += net_amt
 
         # Grand Totals Row
-        grand_total_row = [
-            "",                                                # 0: SNO.
-            "GRAND TOTALS",                                    # 1: BILL NO.
-            "", "", "", "", "", "", "", "", "",                # 2-10: (empty)
-            grand_qty,                                         # 11: SALE QUANTITY
-            "",                                                # 12: RATE/UNIT
-            round(grand_gross, 2),                             # 13: GROSS AMOUNT
-            "",                                                # 14: TOTAL SGST AMOUNT
-            "",                                                # 15: TOTAL CGST AMOUNT
-            round(grand_igst, 2) if grand_igst > 0 else "",    # 16: TOTAL IGST AMOUNT
-            "", "", "", "",                                    # 17-20: (empty)
-            round(grand_net, 2),                               # 21: NET AMOUNT
-            "", "",                                            # 22-23: (empty)
-            round(grand_net, 2),                               # 24: CREDIT
-            "",                                                # 25: CASH
-            "", "", "", "", "", "", "", "", "", "",            # 26-35: (empty)
-            "", "", "", "", "", "", "", "", "", "", ""         # 36-46: (empty)
-        ]
-        data_rows.append(grand_total_row)
+        if sno > 0:
+            grand_total_row = [
+                None,                                           # 0: SNO.
+                "GRAND TOTALS",                                 # 1: BILL NO.
+                None, None, None, None, None, None, None, None, None, # 2-10
+                -round(grand_tax, 2),                           # 11: TAX (RS)
+                None,                                           # 12: LOT NUMBER
+                -grand_qty,                                     # 13: TOTAL QUANTITY
+                None,                                           # 14: RATE/UNIT
+                -round(grand_gross, 2),                         # 15: GROSS AMOUNT
+                None, None, None, None, None,                   # 16-20
+                -round(grand_net, 2),                           # 21: NET AMOUNT
+                None,                                           # 22: CD VALUE
+                -round(grand_gross, 2),                         # 23: AMOUNT W/O TAX
+                -round(grand_net, 2),                           # 24: CREDIT
+                None, None, None, None, None, None, None, None, None, None # 25-34
+            ]
+            data_rows.append(grand_total_row)
 
         timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename_base = f"Accountant_Amazon_Returns_{timestamp_str}"
+        comp_label = "JSPL" if company_id == 3 else ("BKR" if company_id == 2 else "All")
+        filename_base = f"Sales_Returns_{comp_label}_{timestamp_str}"
 
-        return SeriesReportService._export_dataset(
+        return SeriesReportService._export_sales_return_dataset(
             db=db,
             company_id=company_id,
             data_rows=data_rows,
             title_str=title_str,
             filename_base=filename_base,
-            sheet_title="Amazon_Returns",
-            report_type_label="Accountant Amazon Returns",
+            sheet_title="Sales_Returns",
+            report_type_label=f"Accountant Sales Returns ({comp_label})",
+            file_format=file_format
+        )
+
+    @staticmethod
+    def generate_amazon_returns_report(
+        db: Session,
+        company_id: Optional[int] = None,
+        date_from: Optional[Union[date, str]] = None,
+        date_to: Optional[Union[date, str]] = None,
+        file_format: str = "excel"
+    ) -> Tuple[Union[str, bytes], str, str, int]:
+        """
+        Generates Amazon Returns in the exact 35-column format matching SALE RETURN FORMAT.xlsx.
+        """
+        return SeriesReportService.generate_accountant_sales_returns_report(
+            db=db,
+            company_id=company_id,
+            date_from=date_from,
+            date_to=date_to,
+            returns_filter="amazon",
             file_format=file_format
         )
 
@@ -1760,166 +2178,17 @@ class SeriesReportService:
         company_id: Optional[int] = None,
         date_from: Optional[Union[date, str]] = None,
         date_to: Optional[Union[date, str]] = None,
-        file_format: str = "csv"
+        file_format: str = "excel"
     ) -> Tuple[Union[str, bytes], str, str, int]:
         """
-        Generates the Accountant POS Sales Returns / Credit Notes Register in the exact 47-column format.
+        Generates Sales Returns (POS billing + Amazon returns) in the exact 35-column format matching SALE RETURN FORMAT.xlsx.
         """
-        date_from = parse_date_param(date_from)
-        date_to = parse_date_param(date_to)
-        query = db.query(SalesReturn)
-        if company_id:
-            query = query.filter(SalesReturn.company_id == company_id)
-        if date_from:
-            query = query.filter(func.coalesce(SalesReturn.return_date, SalesReturn.created_at) >= datetime.combine(date_from, datetime.min.time()))
-        if date_to:
-            query = query.filter(func.coalesce(SalesReturn.return_date, SalesReturn.created_at) <= datetime.combine(date_to, datetime.max.time()))
-
-        query = query.options(
-            selectinload(SalesReturn.items).selectinload(SalesReturnItem.product),
-            selectinload(SalesReturn.sale)
-        )
-        returns = query.order_by(func.coalesce(SalesReturn.return_date, SalesReturn.created_at).asc(), SalesReturn.id.asc()).all()
-
-        d_from_str = date_from.strftime("%d/%m/%Y") if date_from else "01/10/2026"
-        d_to_str = date_to.strftime("%d/%m/%Y") if date_to else datetime.utcnow().strftime("%d/%m/%Y")
-        title_str = f"SALES RETURN REGISTER (CREDIT NOTES) From {d_from_str} to {d_to_str}"
-
-        data_rows: List[List[Any]] = []
-        sno = 0
-        grand_qty = 0
-        grand_gross = 0.0
-        grand_sgst = 0.0
-        grand_cgst = 0.0
-        grand_igst = 0.0
-        grand_net = 0.0
-
-        for ret in returns:
-            items = ret.items or []
-            if not items:
-                continue
-
-            bill_no = ret.return_number or f"CN-{ret.id}"
-            r_date = ret.return_date or ret.created_at
-            bill_date = r_date.strftime("%d/%m/%Y") if r_date else ""
-            party_name = ret.customer_name or "Retail Customer A/C"
-
-            bill_qty = 0
-            bill_gross = 0.0
-            bill_sgst = 0.0
-            bill_cgst = 0.0
-            bill_igst = 0.0
-            bill_net = 0.0
-
-            for it in items:
-                sno += 1
-                item_code = it.sku_snapshot
-                item_name = it.product_name_snapshot
-                hsn_code = it.hsn_snapshot or ""
-                pack_size = it.unit_snapshot or "PCS"
-                qty = it.returned_quantity or 1
-                rate_unit = float(it.unit_price or 0.0)
-                gross_amt = round(qty * rate_unit, 2)
-                gst_rate = float(it.tax_rate or 0.0)
-                group_tax = "GST TAXFREE" if gst_rate == 0 else f"GST {int(gst_rate) if gst_rate.is_integer() else gst_rate}%"
-
-                # Intrastate retail return default
-                half_rate = gst_rate / 2.0
-                cgst = round(gross_amt * (half_rate / 100.0), 2)
-                sgst = round(gross_amt * (half_rate / 100.0), 2)
-                igst = 0.0
-                tax_3 = int(half_rate) if half_rate.is_integer() else half_rate
-                net_amt = round(float(it.total_price or (gross_amt + cgst + sgst)), 2)
-
-                row = [
-                    sno,                                       # 0: SNO.
-                    bill_no,                                   # 1: BILL NO.
-                    bill_date,                                 # 2: BILL DATE
-                    item_code,                                 # 3: ITEM CODE
-                    item_name,                                 # 4: ITEM NAME
-                    hsn_code,                                  # 5: hsn code
-                    group_tax,                                 # 6: GROUP11.GRP1
-                    "",                                        # 7: GST NO.
-                    "Chandigarh",                              # 8: GST STATE NAME
-                    party_name,                                # 9: PARTY NAME
-                    pack_size,                                 # 10: PACK / SIZE
-                    qty,                                       # 11: SALE QUANTITY
-                    rate_unit,                                 # 12: RATE/UNIT
-                    gross_amt,                                 # 13: GROSS AMOUNT
-                    sgst if sgst > 0 else "",                  # 14: TOTAL SGST AMOUNT
-                    cgst if cgst > 0 else "",                  # 15: TOTAL CGST AMOUNT
-                    "",                                        # 16: TOTAL IGST AMOUNT
-                    "", "", "", tax_3,                         # 17-20: TD, CD, Freight, Tax-3%
-                    net_amt,                                   # 21: NET AMOUNT
-                    "",                                        # 22: CD VALUE
-                    gross_amt,                                 # 23: AMOUNT (USER DEFINED RATE)
-                    net_amt,                                   # 24: CREDIT
-                    "",                                        # 25: CASH
-                    "CGST/SGST",                               # 26: TAX REGION
-                    "",                                        # 27: SCHEME(RS.)
-                    " ", " ", " ",                             # 28-30: REMARKS
-                    "", "", "", "",                            # 31-34: mobile, email, adjust, disc
-                    f"Sale #{ret.sale_id}" if ret.sale_id else " ", # 35: ORDER NO.
-                    "Central Warehouse",                       # 36: GODOWN NAME
-                    f"{round(rate_unit, 2):g}",                # 37: PUR RATE
-                    f"{rate_unit:.4f}",                        # 38: RATE-1
-                    "",                                        # 39: LOT PURCHASE RATE
-                    "Counter Pickup",                          # 40: TRANSPORT MODE
-                    "Chandigarh",                              # 41: CITY NAME
-                    (ret.sale.customer_address if ret.sale and ret.sale.customer_address else "Plot no: 150, Industrial & Business Park-2"), # 42: ADDRESS-1
-                    "", "",                                    # 43-44: ADDRESS-2, 3
-                    hsn_code,                                  # 45: HSN CODE
-                    it.return_reason or ret.return_type or "Sales Return" # 46: HSN DESCRIPTION
-                ]
-                data_rows.append(row)
-
-                bill_qty += qty
-                bill_gross += gross_amt
-                bill_sgst += sgst
-                bill_cgst += cgst
-                bill_net += net_amt
-
-            subtotal_row = [
-                "", "BILL NO. WISE TOTALS",
-                "", "", "", "", "", "", "", "", "",
-                bill_qty, "", round(bill_gross, 2),
-                round(bill_sgst, 2) if bill_sgst > 0 else "",
-                round(bill_cgst, 2) if bill_cgst > 0 else "",
-                "", "", "", "", "", round(bill_net, 2), "", "",
-                round(bill_net, 2), "", "", "", "", "", "", "", "", "", "", "",
-                "", "", "", "", "", "", "", "", "", "", ""
-            ]
-            data_rows.append(subtotal_row)
-
-            grand_qty += bill_qty
-            grand_gross += bill_gross
-            grand_sgst += bill_sgst
-            grand_cgst += bill_cgst
-            grand_net += bill_net
-
-        grand_total_row = [
-            "", "GRAND TOTALS",
-            "", "", "", "", "", "", "", "", "",
-            grand_qty, "", round(grand_gross, 2),
-            round(grand_sgst, 2) if grand_sgst > 0 else "",
-            round(grand_cgst, 2) if grand_cgst > 0 else "",
-            "", "", "", "", "", round(grand_net, 2), "", "",
-            round(grand_net, 2), "", "", "", "", "", "", "", "", "", "", "",
-            "", "", "", "", "", "", "", "", "", "", ""
-        ]
-        data_rows.append(grand_total_row)
-
-        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename_base = f"Accountant_Sales_Returns_{timestamp_str}"
-
-        return SeriesReportService._export_dataset(
+        return SeriesReportService.generate_accountant_sales_returns_report(
             db=db,
             company_id=company_id,
-            data_rows=data_rows,
-            title_str=title_str,
-            filename_base=filename_base,
-            sheet_title="Sales_Returns",
-            report_type_label="Accountant Sales Returns",
+            date_from=date_from,
+            date_to=date_to,
+            returns_filter="all",
             file_format=file_format
         )
 
@@ -1934,8 +2203,8 @@ class SeriesReportService:
     ) -> Tuple[Union[str, bytes], str, str, int]:
         """
         Generates the Amazon Merchant Tax Report (MTR) in the official 86-column Logic ERP format.
-        Matches media_1792838959189_748ab04f.xlsx uploaded by user.
-        Supports filtering by warehouse code (VSHB, IN, KWZ2, BLR4, BOM5, etc.) or all warehouses.
+        Matches media_1792838959189_748ab04f.xlsx and B2C & B2B JSPL OCTOBER.xlsx uploaded by user.
+        Includes all invoices: Shipments, Refunds (with Credit Notes), and Cancellations.
         """
         import openpyxl
         from openpyxl.utils import get_column_letter
@@ -1952,12 +2221,14 @@ class SeriesReportService:
             AmazonLiveAllocation.invoice_date,
             AmazonLiveAllocation.order_date
         )
+
+        # Remove restrictive status == SHIPPED filter to capture all invoices
         alloc_query = db.query(AmazonLiveAllocation).filter(
             or_(
                 AmazonLiveAllocation.allocated_qty > 0,
-                AmazonLiveAllocation.reconciled_qty > 0
-            ),
-            AmazonLiveAllocation.status == AllocationStatus.SHIPPED
+                AmazonLiveAllocation.reconciled_qty > 0,
+                AmazonLiveAllocation.invoice_number.isnot(None)
+            )
         )
         if company_id and wh_clean not in ("IN",):
             has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
@@ -1986,244 +2257,220 @@ class SeriesReportService:
                     matched_wh = wh_q.first()
 
                 if matched_wh:
-                    if matched_wh.code.upper() in ("BKR_CENTRAL",) or (matched_wh.warehouse_type and matched_wh.warehouse_type.value == "CENTRAL" and company_id == 2):
-                        alloc_query = alloc_query.filter(
-                            or_(
-                                AmazonLiveAllocation.warehouse_id == matched_wh.id,
-                                AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN
-                            )
-                        )
-                    elif matched_wh.code.upper() == "IN":
-                        alloc_query = alloc_query.filter(
-                            or_(
-                                AmazonLiveAllocation.warehouse_id == matched_wh.id,
-                                AmazonLiveAllocation.invoice_number.ilike("IN-%")
-                            )
-                        )
-                    else:
-                        alloc_query = alloc_query.filter(AmazonLiveAllocation.warehouse_id == matched_wh.id)
-                else:
-                    # Strict isolation: if a specific warehouse code was requested but not found, filter by invoice_number prefix
                     alloc_query = alloc_query.filter(
                         or_(
-                            AmazonLiveAllocation.invoice_number.ilike(f"{wh_clean}-%"),
-                            AmazonLiveAllocation.warehouse_id == -1
+                            AmazonLiveAllocation.warehouse_id == matched_wh.id,
+                            AmazonLiveAllocation.invoice_number.ilike(f"{wh_clean}-%")
                         )
                     )
+                else:
+                    alloc_query = alloc_query.filter(AmazonLiveAllocation.invoice_number.ilike(f"{wh_clean}-%"))
 
         if date_from:
             alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(date_from, datetime.min.time()))
         if date_to:
             alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(date_to, datetime.max.time()))
 
-        allocations = alloc_query.order_by(alloc_date_col.asc(), AmazonLiveAllocation.id.asc()).all()
+        # Order by invoice date and invoice number
+        allocations = alloc_query.order_by(
+            alloc_date_col.asc(),
+            AmazonLiveAllocation.invoice_number.asc(),
+            AmazonLiveAllocation.id.asc()
+        ).all()
 
-        # Preload lookups
-        prod_query = db.query(Product)
-        if company_id:
-            prod_query = prod_query.filter(Product.company_id == company_id)
-        all_prods = prod_query.all()
-        prod_map_by_company = {(p.company_id, p.sku.upper()): p for p in all_prods if p.sku}
-        prod_map = {p.sku.upper(): p for p in all_prods if p.sku}
-        wh_map = {w.id: w for w in db.query(Warehouse).all()}
-        hub_map = {h.id: h for h in db.query(StateHub).all()}
-        acc_code_map = get_account_code_map()
+        # Cache reference lookups
+        all_warehouses = db.query(Warehouse).all()
+        wh_map = {w.id: w for w in all_warehouses}
+        wh_code_map = {w.code.upper(): w for w in all_warehouses if w.code}
 
-        # Preload sales for order shipping destinations if available
-        order_ids = [a.order_id for a in allocations if a.order_id]
-        sale_map = {}
-        if order_ids:
-            sales_records = db.query(Sale).filter(
-                or_(
-                    Sale.invoice_number.in_(order_ids[:1000]),
-                    Sale.buyer_order_no.in_(order_ids[:1000])
-                )
-            ).all()
-            for s in sales_records:
-                if s.buyer_order_no:
-                    sale_map[s.buyer_order_no] = s
-                if s.invoice_number:
-                    sale_map[s.invoice_number] = s
+        all_products = db.query(Product).all()
+        prod_map = {p.sku.upper(): p for p in all_products if p.sku}
 
-        default_destinations = [
-            ("GUJARAT", "NAVSARI", 396445, "4030"),
-            ("TAMIL NADU", "CHENNAI", 600001, "4047"),
-            ("WEST BENGAL", "KOLKATA", 700001, "4054"),
-            ("DELHI", "NEW DELHI", 110001, "4020"),
-            ("MAHARASHTRA", "PUNE", 411001, "4028"),
-            ("KARNATAKA", "BENGALURU", 560001, "4040"),
-            ("KERALA", "THIRUVANANTHAPURAM", 695001, "4057"),
-            ("HARYANA", "FARIDABAD", 121001, "4029"),
-            ("CHHATTISGARH", "BILASPUR", 495001, "4082"),
-            ("RAJASTHAN", "JAIPUR", 302001, "4056"),
-            ("TELANGANA", "HYDERABAD", 500001, "4048"),
-            ("JAMMU & KASHMIR", "SRINAGAR", 190001, "4037"),
-            ("HIMACHAL PRADESH", "SHIMLA", 171001, "4027")
-        ]
+        # Official GSTIN mapping for JSPL FC locations
+        FC_GSTIN_MAP = {
+            "AMD2": "24AAFCJ8215N1ZA",
+            "BLR4": "29AAFCJ8215N1ZT",
+            "BLR5": "29AAFCJ8215N1ZT",
+            "BLR7": "29AAFCJ8215N1ZT",
+            "BLR8": "29AAFCJ8215N1ZT",
+            "BOM5": "27AAFCJ8215N1Z4",
+            "BOM7": "27AAFCJ8215N1Z4",
+            "DEL2": "07AAFCJ8215N1ZU",
+            "DEL4": "07AAFCJ8215N1ZU",
+            "DEL5": "07AAFCJ8215N1ZU",
+            "HYD8": "36AAFCJ8215N1ZQ",
+            "IN": "04AAFCJ8215N1ZC",
+            "KWZ2": "19AAFCJ8215N1ZY",
+            "MAA4": "33AAFCJ8215N1Z2",
+            "MAA5": "33AAFCJ8215N1Z2",
+            "PNQ3": "27AAFCJ8215N1Z4",
+            "VSHB": "04AAFCJ8215N1ZC"
+        }
+
+        # State abbreviation to full state name and tax rate mappings
+        STATE_LOOKUP = {
+            "AN": ("Andaman and Nicobar Islands", "35"),
+            "AP": ("Andhra Pradesh", "28"),
+            "AR": ("Arunachal Pradesh", "12"),
+            "AS": ("Assam", "18"),
+            "BR": ("Bihar", "10"),
+            "CH": ("Chandigarh", "04"),
+            "CT": ("Chhattisgarh", "22"),
+            "DL": ("Delhi", "07"),
+            "GA": ("Goa", "30"),
+            "GJ": ("Gujarat", "24"),
+            "HR": ("Haryana", "06"),
+            "HP": ("Himachal Pradesh", "02"),
+            "JK": ("Jammu and Kashmir", "01"),
+            "JH": ("Jharkhand", "20"),
+            "KA": ("Karnataka", "29"),
+            "KL": ("Kerala", "32"),
+            "LA": ("Ladakh", "38"),
+            "MP": ("Madhya Pradesh", "23"),
+            "MH": ("Maharashtra", "27"),
+            "MN": ("Manipur", "14"),
+            "ML": ("Meghalaya", "17"),
+            "MZ": ("Mizoram", "15"),
+            "NL": ("Nagaland", "13"),
+            "OR": ("Odisha", "21"),
+            "PB": ("Punjab", "03"),
+            "RJ": ("Rajasthan", "08"),
+            "SK": ("Sikkim", "11"),
+            "TN": ("Tamil Nadu", "33"),
+            "TG": ("Telangana", "36"),
+            "TR": ("Tripura", "16"),
+            "UP": ("Uttar Pradesh", "09"),
+            "UT": ("Uttarakhand", "05"),
+            "WB": ("West Bengal", "19")
+        }
 
         data_rows: List[List[Any]] = []
-        for idx, alloc in enumerate(allocations):
-            wh = wh_map.get(alloc.warehouse_id) if alloc.warehouse_id else None
-            hub = hub_map.get(wh.hub_id) if wh and wh.hub_id else None
-            prod = prod_map_by_company.get((alloc.company_id, (alloc.sku or "").upper())) or prod_map.get((alloc.sku or "").upper())
-            channel = alloc.amazon_network_at_allocation.value if alloc.amazon_network_at_allocation else "MFN"
 
-            # Seller GSTIN
-            seller_gstin = hub.gstin if hub and hub.gstin else ("04AEFPS6301F1ZU" if company_id == 2 else "04AAFCJ8215N1ZC")
-            if channel == "MFN" and (not hub or not hub.gstin):
-                seller_gstin = "04AEFPS6301F1ZU" if company_id == 2 else "04AAFCJ8215N1ZC"
+        for alloc in allocations:
+            wh = wh_map.get(alloc.warehouse_id)
+            if not wh and alloc.invoice_number and "-" in alloc.invoice_number:
+                prefix = alloc.invoice_number.split("-")[0].upper()
+                wh = wh_code_map.get(prefix)
 
-            # Invoice Number: Use actual Amazon Invoice Number or warehouse-suffixed number
-            invoice_num = alloc.invoice_number or (f"IN-{alloc.id}" if channel == "MFN" or (wh and wh.code == "IN") else f"{wh.code if wh else 'AMZ'}-{alloc.id}")
+            prod = prod_map.get((alloc.sku or "").upper())
 
-            inv_dt = alloc.invoice_date or alloc.updated_at or alloc.order_date or alloc.created_at
+            # Dates
+            inv_dt = alloc.invoice_date or alloc.shipment_date or alloc.order_date or alloc.created_at
             ord_dt = alloc.order_date or alloc.created_at or inv_dt
-            ship_dt = alloc.updated_at or inv_dt
+            ship_dt = alloc.shipment_date or inv_dt
 
-            inv_date_str = inv_dt.strftime("%d/%m/%Y %H:%M")
-            order_date_str = ord_dt.strftime("%d/%m/%Y %H:%M")
-            ship_date_str = ship_dt.strftime("%d/%m/%Y %H:%M")
+            inv_date_str = inv_dt.strftime("%d/%m/%Y %H:%M") if inv_dt else ""
+            order_date_str = ord_dt.strftime("%d/%m/%Y %H:%M") if ord_dt else ""
+            ship_date_str = ship_dt.strftime("%d/%m/%Y %H:%M") if ship_dt else ""
 
-            trans_type = "Refund" if alloc.status and alloc.status.value in ("CANCELLED", "RETURNED", "REFUNDED") else "Shipment"
+            # Determine transaction type
+            alloc_status_str = (alloc.status.value if hasattr(alloc.status, "value") else str(alloc.status or "")).upper()
+            is_returned = (alloc_status_str in ("RETURNED", "REFUNDED") or "-C-" in (alloc.invoice_number or "") or (alloc.invoice_number or "").startswith("CN-"))
+            is_cancelled = (alloc_status_str == "CANCELLED" or (not alloc.invoice_number and alloc_status_str == "CANCELLED"))
+
+            if is_cancelled:
+                trans_type = "Cancel"
+                invoice_num = None
+            elif is_returned:
+                trans_type = "Refund"
+                invoice_num = alloc.invoice_number
+            else:
+                trans_type = "Shipment"
+                invoice_num = alloc.invoice_number
+
             order_id = alloc.order_id or ""
-            shipment_id = f"A{alloc.id:09d}{wh.code if wh else 'IN'}"
+            wh_prefix = (wh.code if wh else ("IN" if (alloc.invoice_number or "").startswith("IN-") else "VSHB"))
+            shipment_id = f"A{alloc.id:09d}{wh_prefix}"
             shipment_item_id = int(alloc.amazon_line_item_id) if (alloc.amazon_line_item_id and alloc.amazon_line_item_id.isdigit()) else (575786880000 + alloc.id)
             qty = alloc.allocated_qty or alloc.reconciled_qty or 1
             item_desc = prod.name if prod and prod.name else (alloc.sku or "")
             asin = getattr(prod, "asin", None) or "B0DYNNSY96"
-            hsn = getattr(prod, "hsn", None) or "8424"
+            hsn = getattr(prod, "hsn", None) or alloc.hsn_code or "8424"
             sku = alloc.sku or ""
 
-            # Bill From: Official Amazon Principal Place of Business is in Bengaluru, Karnataka 560042
-            bill_from_city = "Bengaluru"
-            bill_from_state = "KARNATAKA"
-            bill_from_country = "IN"
-            bill_from_postal = 560042
+            # FC GSTIN
+            seller_gstin = FC_GSTIN_MAP.get(wh_prefix, "04AAFCJ8215N1ZC")
 
-            # Ship From: Origin warehouse / FC address
-            ship_from_city = hub.city if hub and hub.city else (wh.name.split()[-1] if wh and " " in wh.name else ("Chandigarh" if channel == "MFN" else "Bengaluru"))
-            ship_from_state = (hub.state or ("CHANDIGARH" if channel == "MFN" else "KARNATAKA")).upper()
-            ship_from_country = "IN"
-            if "CHANDIGARH" in ship_from_state:
-                ship_from_postal = 160002
-            elif "KARNATAKA" in ship_from_state:
-                ship_from_postal = 560042
-            elif "MAHARASHTRA" in ship_from_state:
-                ship_from_postal = 411001
-            elif "HARYANA" in ship_from_state:
-                ship_from_postal = 122001
-            elif "WEST BENGAL" in ship_from_state or "WEST_BANGA" in ship_from_state:
-                ship_from_postal = 711322
-            elif "TAMIL NADU" in ship_from_state:
-                ship_from_postal = 641201
-            elif "GUJARAT" in ship_from_state:
-                ship_from_postal = 382220
+            # Ship-to State & Customer details
+            raw_state = alloc.state_name or "CHANDIGARH"
+            clean_state = raw_state.strip().upper()
+            ship_state_name, ship_state_code = "Chandigarh", "04"
+            for k, (sname, scode) in STATE_LOOKUP.items():
+                if k == clean_state or sname.upper() == clean_state or sname.upper() in clean_state:
+                    ship_state_name, ship_state_code = sname, scode
+                    break
+
+            is_b2b = bool(alloc.customer_gstin and len(alloc.customer_gstin.strip()) >= 15)
+            buyer_gstin = alloc.customer_gstin.strip() if is_b2b else None
+            tax_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
+
+            # Amounts calculation
+            if is_cancelled:
+                invoice_amt = 0.0
+                tax_exclusive_gross = 0.0
+                cgst_amt = 0.0
+                sgst_amt = 0.0
+                igst_amt = 0.0
+                credit_note_no = None
+                credit_note_date = None
             else:
-                ship_from_postal = 160002
+                raw_net = float(alloc.net_amount or 0.0)
+                raw_gross = float(alloc.gross_amount or 0.0)
+                raw_tax = float(alloc.tax_amount or 0.0)
 
-            # Ship To Destination
-            linked_sale = sale_map.get(order_id)
-            if alloc.state_name:
-                ship_to_state = alloc.state_name.strip().upper()
-                ship_to_city = "CITY"
-                ship_to_postal = 160002 if "CHANDIGARH" in ship_to_state else 380001
-                acc_code = acc_code_map.get(ship_to_state) or "4030"
-            elif linked_sale and (linked_sale.shipping_state or linked_sale.customer_state):
-                ship_to_state = (linked_sale.shipping_state or linked_sale.customer_state).strip().upper()
-                ship_to_city = (linked_sale.destination or linked_sale.shipping_address or linked_sale.customer_address or "CITY").strip().upper()
-                ship_to_postal = 380001
-                acc_code = acc_code_map.get(ship_to_state) or acc_code_map.get(deduce_state_from_gstin(linked_sale.customer_gstin, "").upper()) or "4030"
-            else:
-                dest = default_destinations[idx % len(default_destinations)]
-                ship_to_state = dest[0]
-                ship_to_city = dest[1]
-                ship_to_postal = dest[2]
-                acc_code = dest[3]
+                if raw_gross > 0 and raw_tax > 0:
+                    calc_rate = round((raw_tax / raw_gross) * 100)
+                    if calc_rate in (5, 12, 18, 28):
+                        tax_rate = calc_rate
 
-            # Financial & Tax Calculation
-            gst_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
-            pur_rate = float(prod.item_rate if prod and prod.item_rate else 0.0)
-            selling_unit = round(pur_rate * 1.35, 2) if pur_rate > 0 else 500.0
+                if raw_gross == 0.0 and raw_net > 0.0:
+                    raw_gross = round(raw_net / (1 + (tax_rate / 100.0)), 2)
+                    raw_tax = round(raw_net - raw_gross, 2)
+                elif raw_net == 0.0 and raw_gross > 0.0:
+                    raw_tax = round(raw_gross * (tax_rate / 100.0), 2)
+                    raw_net = round(raw_gross + raw_tax, 2)
 
-            if alloc.net_amount and float(alloc.net_amount) > 0:
-                invoice_amt = round(float(alloc.net_amount), 2)
-                tax_exclusive = round(float(alloc.gross_amount), 2) if alloc.gross_amount else round(invoice_amt / (1 + (gst_rate / 100.0)), 2)
-                total_tax = round(float(alloc.tax_amount), 2) if alloc.tax_amount else round(invoice_amt - tax_exclusive, 2)
-            else:
-                invoice_amt = round(selling_unit * qty, 2)
-                tax_exclusive = round(invoice_amt / (1 + (gst_rate / 100.0)), 2)
-                total_tax = round(invoice_amt - tax_exclusive, 2)
-
-            # Product tax code
-            if gst_rate <= 5:
-                tax_code = "A_GEN_SUPERREDUCED"
-            elif gst_rate <= 12:
-                tax_code = "A_GEN_REDUCED"
-            else:
-                tax_code = "A_GEN_STANDARD"
-
-            # Check Intra-State vs Inter-State
-            is_intra = (ship_from_state.strip().upper() == ship_to_state.strip().upper())
-            is_ut = "CHANDIGARH" in ship_from_state or "DELHI" in ship_from_state
-
-            cgst_rate = 0.0
-            sgst_rate = 0.0
-            utgst_rate = 0.0
-            igst_rate = 0.0
-            cgst_tax = 0.0
-            sgst_tax = 0.0
-            utgst_tax = 0.0
-            igst_tax = 0.0
-            comp_cess_rate = 0.0
-            comp_cess_tax = 0.0
-
-            tcs_cgst_rate = 0.0
-            tcs_cgst_amt = 0.0
-            tcs_sgst_rate = 0.0
-            tcs_sgst_amt = 0.0
-            tcs_utgst_rate = 0.0
-            tcs_utgst_amt = 0.0
-            tcs_igst_rate = 0.0
-            tcs_igst_amt = 0.0
-
-            if is_intra:
-                half_rate = round((gst_rate / 2.0) / 100.0, 4)
-                half_tax = round(total_tax / 2.0, 2)
-                rem_tax = round(total_tax - half_tax, 2)
-                cgst_rate = half_rate
-                cgst_tax = half_tax
-                tcs_cgst_rate = 0.005
-                tcs_cgst_amt = round(tax_exclusive * 0.005, 2)
-                if is_ut:
-                    utgst_rate = half_rate
-                    utgst_tax = rem_tax
-                    tcs_utgst_rate = 0.005
-                    tcs_utgst_amt = round(tax_exclusive * 0.005, 2)
+                # Intrastate vs Interstate
+                is_intra = (seller_gstin[:2] == ship_state_code)
+                if is_intra:
+                    cgst_amt = round(raw_tax / 2.0, 2)
+                    sgst_amt = round(raw_tax / 2.0, 2)
+                    igst_amt = 0.0
                 else:
-                    sgst_rate = half_rate
-                    sgst_tax = rem_tax
-                    tcs_sgst_rate = 0.005
-                    tcs_sgst_amt = round(tax_exclusive * 0.005, 2)
-                tax_region = 2
-            else:
-                igst_rate = round(gst_rate / 100.0, 4)
-                igst_tax = total_tax
-                tcs_igst_rate = 0.005
-                tcs_igst_amt = round(tax_exclusive * 0.005, 2)
-                tax_region = 4
+                    cgst_amt = 0.0
+                    sgst_amt = 0.0
+                    igst_amt = round(raw_tax, 2)
 
-            wh_id_col = None if channel == "MFN" else (wh.code if wh else None)
+                tax_exclusive_gross = raw_gross
+                invoice_amt = raw_net
 
-            # Exactly 86 columns
+                if is_returned:
+                    qty = -abs(qty)
+                    tax_exclusive_gross = -abs(tax_exclusive_gross)
+                    cgst_amt = -abs(cgst_amt)
+                    sgst_amt = -abs(sgst_amt)
+                    igst_amt = -abs(igst_amt)
+                    invoice_amt = -abs(invoice_amt)
+                    credit_note_no = f"CN-{alloc.id}"
+                    credit_note_date = inv_dt
+                else:
+                    credit_note_no = None
+                    credit_note_date = None
+
+            cgst_rate = (tax_rate / 2.0) if (cgst_amt != 0.0) else 0.0
+            sgst_rate = (tax_rate / 2.0) if (sgst_amt != 0.0) else 0.0
+            igst_rate = tax_rate if (igst_amt != 0.0) else 0.0
+
+            # 86-column official Logic ERP MTR Row
             row = [
                 seller_gstin,           # 0: Seller Gstin
                 invoice_num,            # 1: Invoice Number
-                inv_date_str,           # 2: Invoice Date
+                inv_dt,                 # 2: Invoice Date
                 trans_type,             # 3: Transaction Type
                 order_id,               # 4: Order Id
                 shipment_id,            # 5: Shipment Id
-                ship_date_str,          # 6: Shipment Date
-                order_date_str,         # 7: Order Date
+                ship_dt if not is_cancelled else None, # 6: Shipment Date
+                ord_dt if not is_cancelled else None,  # 7: Order Date
                 shipment_item_id,       # 8: Shipment Item Id
                 qty,                    # 9: Quantity
                 item_desc,              # 10: Item Description
@@ -2231,130 +2478,163 @@ class SeriesReportService:
                 hsn,                    # 12: Hsn/sac
                 sku,                    # 13: Sku
                 None,                   # 14: Item Serial No.
-                tax_code,               # 15: Product Tax Code
-                bill_from_city,         # 16: Bill From City
-                bill_from_state,        # 17: Bill From State
-                bill_from_country,      # 18: Bill From Country
-                bill_from_postal,       # 19: Bill From Postal Code
-                ship_from_city,         # 20: Ship From City
-                ship_from_state,        # 21: Ship From State
-                ship_from_country,      # 22: Ship From Country
-                ship_from_postal,       # 23: Ship From Postal Code
-                ship_to_city,           # 24: Ship To City
-                ship_to_state,          # 25: Ship To State
-                "IN",                   # 26: Ship To Country
-                ship_to_postal,         # 27: Ship To Postal Code
-                invoice_amt,            # 28: Invoice Amount
-                tax_exclusive,          # 29: Tax Exclusive Gross
-                total_tax,              # 30: Total Tax Amount
-                cgst_rate,              # 31: Cgst Rate
-                sgst_rate,              # 32: Sgst Rate
-                utgst_rate,             # 33: Utgst Rate
-                igst_rate,              # 34: Igst Rate
-                comp_cess_rate,         # 35: Compensatory Cess Rate
-                invoice_amt,            # 36: Principal Amount
-                tax_exclusive,          # 37: Principal Amount Basis
-                cgst_tax,               # 38: Cgst Tax
-                sgst_tax,               # 39: Sgst Tax
-                igst_tax,               # 40: Igst Tax
-                utgst_tax,              # 41: Utgst Tax
-                comp_cess_tax,          # 42: Compensatory Cess Tax
-                0,                      # 43: Shipping Amount
-                0,                      # 44: Shipping Amount Basis
-                0,                      # 45: Shipping Cgst Tax
-                0,                      # 46: Shipping Sgst Tax
-                0,                      # 47: Shipping Utgst Tax
-                0,                      # 48: Shipping Igst Tax
-                0,                      # 49: Shipping Cess Tax Amount
-                0,                      # 50: Gift Wrap Amount
-                0,                      # 51: Gift Wrap Amount Basis
-                0,                      # 52: Gift Wrap Cgst Tax
-                0,                      # 53: Gift Wrap Sgst Tax
-                0,                      # 54: Gift Wrap Utgst Tax
-                0,                      # 55: Gift Wrap Igst Tax
-                0,                      # 56: Gift Wrap Compensatory Cess Tax
-                0,                      # 57: Item Promo Discount
-                0,                      # 58: Item Promo Discount Basis
-                0,                      # 59: Item Promo Discount Tax
-                0,                      # 60: Shipping Promo Discount
-                0,                      # 61: Shipping Promo Discount Basis
-                0,                      # 62: Shipping Promo Discount Tax
-                0,                      # 63: Gift Wrap Promo Discount
-                0,                      # 64: Gift Wrap Promo Discount Basis
-                0,                      # 65: Gift Wrap Promo Discount Tax
-                tcs_cgst_rate,          # 66: Tcs Cgst Rate
-                tcs_cgst_amt,           # 67: Tcs Cgst Amount
-                tcs_sgst_rate,          # 68: Tcs Sgst Rate
-                tcs_sgst_amt,           # 69: Tcs Sgst Amount
-                tcs_utgst_rate,         # 70: Tcs Utgst Rate
-                tcs_utgst_amt,          # 71: Tcs Utgst Amount
-                tcs_igst_rate,          # 72: Tcs Igst Rate
-                tcs_igst_amt,           # 73: Tcs Igst Amount
-                wh_id_col,              # 74: Warehouse Id
-                channel,                # 75: Fulfillment Channel
-                "PayStation",           # 76: Payment Method Code
-                None,                   # 77: Credit Note No
-                None,                   # 78: Credit Note Date
-                None,                   # 79: Irn Number
-                None,                   # 80: Irn Filing Status
-                None,                   # 81: Irn Date
-                None,                   # 82: Irn Error Code
-                "JH",                   # 83: MEM SHIP
-                tax_region,             # 84: TAX REGION
-                acc_code                # 85: ACCOUT CODE
+                "Amazon Seller Services Private Limited", # 15: Bill From Name
+                "Bengaluru",            # 16: Bill From City
+                "Karnataka",            # 17: Bill From State
+                "560042",               # 18: Bill From Postal Code
+                wh_prefix,              # 19: Ship From Name
+                "Plot no: 150, Industrial & Business Park-2", # 20: Ship From Address
+                "Chandigarh",           # 21: Ship From City
+                "IN",                   # 22: Ship From Country
+                seller_gstin,           # 23: Ship From Gstin
+                "160002",               # 24: Ship From Postal Code
+                "Chandigarh",           # 25: Ship From State
+                alloc.party_name or f"Customer ({ship_state_name})", # 26: Ship To Name
+                ship_state_name,        # 27: Ship To City
+                "IN",                   # 28: Ship To Country
+                invoice_amt,            # 29: Invoice Amount
+                tax_exclusive_gross,    # 30: Tax Exclusive Gross
+                cgst_amt,               # 31: Total Tax Amount (or cgst)
+                cgst_rate,              # 32: Cgst Rate
+                cgst_amt,               # 33: Cgst Amount
+                sgst_rate,              # 34: Sgst Rate
+                sgst_amt,               # 35: Sgst Amount
+                igst_rate,              # 36: Igst Rate
+                igst_amt,               # 37: Igst Amount
+                0.0,                    # 38: Utgst Rate
+                0.0,                    # 39: Utgst Amount
+                0.0,                    # 40: Cess Rate
+                0.0,                    # 41: Cess Amount
+                None,                   # 42: Warehouse Id
+                ship_state_name,        # 43: Customer Bill To State
+                ship_state_name,        # 44: Customer Ship To State
+                buyer_gstin,            # 45: Buyer Gstin
+                "IN",                   # 46: Place of Supply
+                "Principal Place",      # 47: Ship From Place
+                None,                   # 48: Shipping Partner
+                None,                   # 49: Tracking Number
+                None,                   # 50: Carrier Status
+                None,                   # 51: Fulfillment Channel
+                None,                   # 52: Sales Channel
+                None,                   # 53: Ship Service Level
+                None,                   # 54: Principal Amount
+                None,                   # 55: Shipping Amount
+                None,                   # 56: Gift Wrap Amount
+                None,                   # 57: Item Promo Discount
+                None,                   # 58: Shipment Promo Discount
+                None,                   # 59: TCS CGST Rate
+                None,                   # 60: TCS CGST Amount
+                None,                   # 61: TCS SGST Rate
+                None,                   # 62: TCS SGST Amount
+                None,                   # 63: TCS IGST Rate
+                None,                   # 64: TCS IGST Amount
+                None,                   # 65: TCS UTGST Rate
+                None,                   # 66: TCS UTGST Amount
+                None,                   # 67: TCS Cess Rate
+                None,                   # 68: TCS Cess Amount
+                None,                   # 69: Shipping HSN
+                None,                   # 70: Gift Wrap HSN
+                None,                   # 71: Gift Wrap Tax Amount
+                None,                   # 72: Shipping Tax Amount
+                None,                   # 73: Shipping Discount
+                None,                   # 74: Shipping Discount Tax Amount
+                None,                   # 75: Gift Wrap Discount
+                None,                   # 76: Gift Wrap Discount Tax Amount
+                credit_note_no,         # 77: Credit Note No
+                credit_note_date,       # 78: Credit Note Date
+                None,                   # 79: Is B2B
+                None,                   # 80: Reverse Charge
+                None,                   # 81: E-Commerce Operator GSTIN
+                None,                   # 82: E-Commerce Operator Name
+                None,                   # 83: Original Invoice Number
+                None,                   # 84: Original Invoice Date
+                None                    # 85: Reason for Credit Note
             ]
             data_rows.append(row)
 
         timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         suffix = f"_{wh_clean}" if wh_clean and wh_clean != "ALL" else ""
         filename_base = f"Amazon_MTR_Report{suffix}_{timestamp_str}"
-        fmt = (file_format or "excel").lower()
 
-        if fmt == "csv":
-            stream = io.StringIO()
-            writer = csv.writer(stream)
-            writer.writerow(AMAZON_MTR_COLUMNS)
+        # 86 Official MTR Headers
+        MTR_HEADERS = [
+            "Seller Gstin", "Invoice Number", "Invoice Date", "Transaction Type", "Order Id",
+            "Shipment Id", "Shipment Date", "Order Date", "Shipment Item Id", "Quantity",
+            "Item Description", "Asin", "Hsn/sac", "Sku", "Item Serial No.",
+            "Bill From Name", "Bill From City", "Bill From State", "Bill From Postal Code",
+            "Ship From Name", "Ship From Address", "Ship From City", "Ship From Country",
+            "Ship From Gstin", "Ship From Postal Code", "Ship From State",
+            "Ship To Name", "Ship To City", "Ship To Country", "Invoice Amount",
+            "Tax Exclusive Gross", "Total Tax Amount", "Cgst Rate", "Cgst Amount",
+            "Sgst Rate", "Sgst Amount", "Igst Rate", "Igst Amount", "Utgst Rate",
+            "Utgst Amount", "Cess Rate", "Cess Amount", "Warehouse Id",
+            "Customer Bill To State", "Customer Ship To State", "Buyer Gstin",
+            "Place of Supply", "Ship From Place", "Shipping Partner", "Tracking Number",
+            "Carrier Status", "Fulfillment Channel", "Sales Channel", "Ship Service Level",
+            "Principal Amount", "Shipping Amount", "Gift Wrap Amount", "Item Promo Discount",
+            "Shipment Promo Discount", "TCS CGST Rate", "TCS CGST Amount", "TCS SGST Rate",
+            "TCS SGST Amount", "TCS IGST Rate", "TCS IGST Amount", "TCS UTGST Rate",
+            "TCS UTGST Amount", "TCS Cess Rate", "TCS Cess Amount", "Shipping HSN",
+            "Gift Wrap HSN", "Gift Wrap Tax Amount", "Shipping Tax Amount",
+            "Shipping Discount", "Shipping Discount Tax Amount", "Gift Wrap Discount",
+            "Gift Wrap Discount Tax Amount", "Credit Note No", "Credit Note Date",
+            "Is B2B", "Reverse Charge", "E-Commerce Operator GSTIN",
+            "E-Commerce Operator Name", "Original Invoice Number",
+            "Original Invoice Date", "Reason for Credit Note"
+        ]
+
+        if file_format.lower() == "csv":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(MTR_HEADERS)
             for r in data_rows:
                 writer.writerow(r)
-            content = stream.getvalue()
+            content = output.getvalue()
             filename = f"{filename_base}.csv"
-            media_type = "text/csv; charset=utf-8"
+            media_type = "text/csv"
             filepath = os.path.join(REPORTS_DIR, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
-        else:
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Sheet1"
-            ws.append(AMAZON_MTR_COLUMNS)
-            for r in data_rows:
-                ws.append(r)
+            if company_id:
+                rep_hist = ReportHistory(
+                    company_id=company_id,
+                    report_type=f"Amazon MTR ({wh_clean or 'All'})",
+                    file_path=filepath,
+                    download_link=f"/api/reports/download/{filename}"
+                )
+                db.add(rep_hist)
+                db.commit()
+            return content, filename, media_type, len(data_rows)
 
-            for col_idx in range(1, len(AMAZON_MTR_COLUMNS) + 1):
-                col_letter = get_column_letter(col_idx)
-                header_len = len(str(AMAZON_MTR_COLUMNS[col_idx - 1]))
-                ws.column_dimensions[col_letter].width = max(header_len + 3, 12)
+        # Excel (.xlsx) formatting matching 456.xlsx and B2C & B2B JSPL OCTOBER.xlsx
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = (wh_clean or "MTR_Report")[:31]
 
-            stream = io.BytesIO()
-            wb.save(stream)
-            content = stream.getvalue()
-            filename = f"{filename_base}.xlsx"
-            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            filepath = os.path.join(REPORTS_DIR, filename)
-            with open(filepath, "wb") as f:
-                f.write(content)
+        ws.append(MTR_HEADERS)
+        for r in data_rows:
+            ws.append(r)
 
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        content_bytes = out.getvalue()
+        filename = f"{filename_base}.xlsx"
+
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filepath = os.path.join(REPORTS_DIR, filename)
+        with open(filepath, "wb") as f:
+            f.write(content_bytes)
         if company_id:
             rep_hist = ReportHistory(
                 company_id=company_id,
-                report_type=f"AMAZON_MTR{suffix}",
+                report_type=f"Amazon MTR ({wh_clean or 'All'})",
                 file_path=filepath,
                 download_link=f"/api/reports/download/{filename}"
             )
             db.add(rep_hist)
             db.commit()
-
-        return content, filename, media_type, len(data_rows)
+        return content_bytes, filename, media_type, len(data_rows)
 
     @staticmethod
     def generate_accountant_report(

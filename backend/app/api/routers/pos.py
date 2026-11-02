@@ -213,20 +213,39 @@ def search_products(q: str = "", warehouse_id: Optional[int] = None, company_id:
         (Product.sku.ilike(search_term)) | (Product.name.ilike(search_term))
     ).limit(20).all()
 
-    return [
-        {
+    # For any product missing HSN or default_price, fall back to master catalog SKU
+    missing_skus = [r.sku for r in results if not r.hsn or not r.default_price]
+    sku_fallback_map = {}
+    if missing_skus:
+        fallbacks = db.query(Product).filter(
+            Product.sku.in_(missing_skus),
+            Product.status == "Active",
+            (Product.hsn != None) | (Product.item_rate > 0)
+        ).all()
+        for fb in fallbacks:
+            if fb.sku not in sku_fallback_map or (fb.hsn and fb.item_rate and fb.item_rate > 0):
+                sku_fallback_map[fb.sku] = fb
+
+    response_items = []
+    for r in results:
+        fb = sku_fallback_map.get(r.sku)
+        hsn_val = r.hsn or (fb.hsn if fb else None) or "84248200"
+        price_val = r.default_price if (r.default_price and r.default_price > 0) else ((fb.item_rate if fb and fb.item_rate else 0.0) if fb else r.default_price)
+        gst_val = r.default_gst_rate if r.default_gst_rate is not None else ((fb.default_gst_rate if fb else 18.0) if fb else r.default_gst_rate)
+
+        response_items.append({
             "id": r.id,
             "sku": r.sku,
             "name": r.name,
-            "hsn_sac": r.hsn,
+            "hsn_sac": hsn_val,
             "unit": r.unit or ("SERV" if (r.category in ["SERV", "SERVICE"] or r.sku == "SERVICE CHARGE") else "PCS"),
-            "brand": r.brand,
-            "category": r.category,
-            "default_price": r.default_price,
-            "default_gst_rate": r.default_gst_rate,
+            "brand": r.brand or (fb.brand if fb else None),
+            "category": r.category or (fb.category if fb else None),
+            "default_price": price_val,
+            "default_gst_rate": gst_val,
             "available_stock": 999999 if (r.category in ["SERV", "SERVICE"] or r.sku == "SERVICE CHARGE") else r.available_stock
-        } for r in results
-    ]
+        })
+    return response_items
 
 @router.get("/service-charge-item")
 def get_service_charge_item(company_id: int = Depends(get_bkr_company_id), db: Session = Depends(get_db)):
