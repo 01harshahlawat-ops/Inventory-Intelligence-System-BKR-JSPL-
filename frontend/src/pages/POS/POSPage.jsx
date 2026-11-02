@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { posService } from '../../services/pos';
@@ -230,20 +230,47 @@ const POSPage = () => {
 
   const [selectedWarehouseId, setSelectedWarehouseId] = useState(savedState.selectedWarehouseId || '');
 
+  const sortedWarehouses = useMemo(() => {
+    const list = [...activeWarehouses];
+    const isJspl = (companyCode || '').toUpperCase() === 'JSPL';
+    return list.sort((a, b) => {
+      const aIsVshb = isJspl && (a.code || '').toUpperCase() === 'VSHB';
+      const bIsVshb = isJspl && (b.code || '').toUpperCase() === 'VSHB';
+      if (aIsVshb && !bIsVshb) return -1;
+      if (!aIsVshb && bIsVshb) return 1;
+
+      const aIsCentral = (a.warehouse_type || '').toUpperCase() === 'CENTRAL';
+      const bIsCentral = (b.warehouse_type || '').toUpperCase() === 'CENTRAL';
+      if (aIsCentral && !bIsCentral) return -1;
+      if (!aIsCentral && bIsCentral) return 1;
+
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [activeWarehouses, companyCode]);
+
   // Default warehouse selection logic
   useEffect(() => {
     if (activeWarehouses.length > 0) {
-      const isValid = activeWarehouses.find(w => String(w.id) === String(selectedWarehouseId));
-      if (!isValid) {
-        const defaultWh = activeWarehouses.find(w => 
-          (w.code || '').toUpperCase().includes('DEFAULT') || 
-          (w.code || '').toUpperCase().includes('MAIN') ||
-          (w.code || '').toUpperCase().includes('POS')
-        ) || activeWarehouses[0];
+      const isJspl = (companyCode || '').toUpperCase() === 'JSPL';
+      const defaultWh = isJspl 
+        ? (activeWarehouses.find(w => (w.code || '').toUpperCase() === 'VSHB') ||
+           activeWarehouses.find(w => (w.warehouse_type || '').toUpperCase() === 'CENTRAL') ||
+           activeWarehouses[0])
+        : (activeWarehouses.find(w => (w.code || '').toUpperCase() === 'BKR_CENTRAL') ||
+           activeWarehouses.find(w => (w.warehouse_type || '').toUpperCase() === 'CENTRAL') ||
+           activeWarehouses.find(w => 
+             (w.code || '').toUpperCase().includes('DEFAULT') || 
+             (w.code || '').toUpperCase().includes('MAIN') ||
+             (w.code || '').toUpperCase().includes('POS')
+           ) ||
+           activeWarehouses[0]);
+
+      const currentWh = activeWarehouses.find(w => String(w.id) === String(selectedWarehouseId));
+      if (!currentWh || (isJspl && currentWh.warehouse_type !== 'CENTRAL' && defaultWh)) {
         setSelectedWarehouseId(defaultWh.id);
       }
     }
-  }, [activeWarehouses, selectedWarehouseId]);
+  }, [activeWarehouses, companyCode]);
 
   const { data: companySettings } = useQuery({
     queryKey: ['companySettings'],
@@ -405,20 +432,19 @@ const POSPage = () => {
     const newCart = [...cart];
     const item = { ...newCart[index] };
 
-    if (field === 'quantity') item.quantity = value === '' ? '' : (parseInt(value) || 0);
+    if (field === 'quantity') {
+      item.quantity = value === '' ? '' : (parseInt(value, 10) || 0);
+      if (item.sku !== 'SERVICE CHARGE' && item.available_stock !== undefined && Number(item.quantity) > item.available_stock) {
+        setError(`Notice: Billing quantity (${item.quantity}) exceeds recorded stock (${item.available_stock}) for ${item.sku}.`);
+        setTimeout(() => setError(''), 4000);
+      }
+    }
     if (field === 'selling_price') item.selling_price = value === '' ? '' : (parseFloat(value) || 0);
     if (field === 'gst_rate') {
       item.gst_rate = value === '' ? '' : (parseFloat(value) || 0);
       item.gst_needs_confirmation = false;
     }
     if (field === 'hsn_sac') item.hsn_sac = value;
-
-    // Validate stock (skip for service charge)
-    if (field === 'quantity' && item.sku !== 'SERVICE CHARGE' && Number(item.quantity) > item.available_stock) {
-      item.quantity = item.available_stock;
-      setError(`Cannot exceed available stock (${item.available_stock}) for ${item.sku}`);
-      setTimeout(() => setError(''), 3000);
-    }
 
     const qty = Number(item.quantity) || 0;
     const price = Number(item.selling_price) || 0;
@@ -739,7 +765,7 @@ const POSPage = () => {
         product_name: item.product_name || item.name,
         hsn_sac: item.hsn_sac || null,
         unit: item.unit || null,
-        quantity: Number(item.quantity) || 1,
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
         selling_price: Number(item.selling_price) || 0,
         discount: Number(item.discount) || 0,
         gst_rate: Number(item.gst_rate) || 0,
@@ -907,7 +933,7 @@ const POSPage = () => {
                     onChange={e => setSelectedWarehouseId(e.target.value)}
                     className={styles.inputField}
                   >
-                    {activeWarehouses.map(w => (
+                    {(sortedWarehouses.length > 0 ? sortedWarehouses : activeWarehouses).map(w => (
                       <option key={w.id} value={w.id}>{w.name} ({w.code})</option>
                     ))}
                   </select>

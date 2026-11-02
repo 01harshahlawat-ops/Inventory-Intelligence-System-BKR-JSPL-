@@ -173,8 +173,13 @@ def search_products(q: str = "", warehouse_id: Optional[int] = None, company_id:
 
     search_term = f"%{q}%"
     
+    company = db.query(Company).filter(Company.id == company_id).first()
+    company_code = company.code if company else "CO"
+
     if warehouse_id:
         default_warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id, Warehouse.company_id == company_id).first()
+        if default_warehouse and company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
+            default_warehouse = None
         if not default_warehouse:
             default_warehouse = _resolve_default_bkr_warehouse(db, company_id)
     else:
@@ -316,10 +321,20 @@ def complete_sale(
                 "receipt": _build_invoice_dto(existing_sale, db)
             }
 
+    company = db.query(Company).filter(Company.id == company_id).first()
+    company_code = company.code if company else "CO"
+
     if payload.origin_warehouse_id:
-        default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == payload.origin_warehouse_id).first()
+        default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(
+            Warehouse.id == payload.origin_warehouse_id,
+            Warehouse.company_id == company_id,
+            Warehouse.status == "ACTIVE"
+        ).first()
+        # For JSPL POS, if warehouse is not CENTRAL / VSHB, fallback to VSHB
+        if default_warehouse and company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
+            default_warehouse = None
         if not default_warehouse:
-            raise HTTPException(status_code=400, detail="Origin warehouse not found")
+            default_warehouse = _resolve_default_warehouse(db, company_id)
     else:
         default_warehouse = _resolve_default_warehouse(db, company_id)
 
@@ -360,7 +375,7 @@ def complete_sale(
                     if combined_available < total_qty:
                         product = products_by_id.get(product_id) or db.query(Product).filter(Product.id == product_id).first()
                         sku_name = product.sku if product else str(product_id)
-                        raise HTTPException(status_code=400, detail=f"Insufficient Stock for SKU: {sku_name} (Requested: {total_qty}, Combined Available: {combined_available})")
+                        logger.warning(f"POS sale for SKU {sku_name} exceeds recorded stock: Requested {total_qty}, Combined Available: {combined_available}")
                 else:
                     inv = db.query(Inventory).filter(
                         Inventory.product_id == product_id,
@@ -371,7 +386,8 @@ def complete_sale(
                     if not inv or inv.available_qty < total_qty:
                         product = products_by_id.get(product_id) or db.query(Product).filter(Product.id == product_id).first()
                         sku_name = product.sku if product else str(product_id)
-                        raise HTTPException(status_code=400, detail=f"Insufficient Stock for SKU: {sku_name}")
+                        avail_qty = inv.available_qty if inv else 0
+                        logger.warning(f"POS sale for SKU {sku_name} exceeds recorded stock: Requested {total_qty}, Available: {avail_qty}")
 
         # 2. Generate Invoice Number (sequence-based or prefixed custom)
         from app.services.document_number_service import DocumentNumberService
@@ -566,8 +582,24 @@ def complete_sale(
                         Inventory.company_id == company_id
                     ).first()
                     central_avail = max(0, central_inv.available_qty if central_inv else 0)
-                    qty_from_39 = min(qty_needed, central_avail)
-                    qty_from_2 = qty_needed - qty_from_39
+
+                    wh2_inv = db.query(Inventory).filter(
+                        Inventory.product_id == product.id,
+                        Inventory.warehouse_id == 2,
+                        Inventory.company_id == company_id
+                    ).first()
+                    wh2_avail = max(0, wh2_inv.available_qty if wh2_inv else 0)
+
+                    if central_avail >= qty_needed:
+                        qty_from_39 = qty_needed
+                        qty_from_2 = 0
+                    elif (central_avail + wh2_avail) >= qty_needed:
+                        qty_from_39 = central_avail
+                        qty_from_2 = qty_needed - qty_from_39
+                    else:
+                        # If both combined do not cover, allocate available to WH2 and rest to WH39
+                        qty_from_2 = wh2_avail
+                        qty_from_39 = qty_needed - qty_from_2
 
                     if qty_from_39 > 0:
                         InventoryEventEngine.process_event(
@@ -579,7 +611,8 @@ def complete_sale(
                             event_type="SALE",
                             source="OFFLINE_POS",
                             reference_id=bill_number,
-                            metadata_payload={"sale_id": sale.id}
+                            metadata_payload={"sale_id": sale.id},
+                            allow_negative_stock=True
                         )
                     if qty_from_2 > 0:
                         InventoryEventEngine.process_event(
@@ -591,7 +624,8 @@ def complete_sale(
                             event_type="SALE",
                             source="OFFLINE_POS",
                             reference_id=bill_number,
-                            metadata_payload={"sale_id": sale.id}
+                            metadata_payload={"sale_id": sale.id},
+                            allow_negative_stock=True
                         )
                 else:
                     InventoryEventEngine.process_event(
@@ -603,7 +637,8 @@ def complete_sale(
                         event_type="SALE",
                         source="OFFLINE_POS",
                         reference_id=bill_number,
-                        metadata_payload={"sale_id": sale.id}
+                        metadata_payload={"sale_id": sale.id},
+                        allow_negative_stock=True
                     )
 
         if commit:
@@ -1470,8 +1505,17 @@ def update_sale(
         sale.tally_sync_status = 'PENDING'
         
     # 2. Resolve default warehouse for delta tracking
+    target_company = db.query(Company).filter(Company.id == target_company_id).first()
+    target_company_code = target_company.code if target_company else "CO"
+
     if payload.origin_warehouse_id:
-        default_warehouse = db.query(Warehouse).filter(Warehouse.id == payload.origin_warehouse_id).first()
+        default_warehouse = db.query(Warehouse).filter(
+            Warehouse.id == payload.origin_warehouse_id,
+            Warehouse.company_id == target_company_id,
+            Warehouse.status == "ACTIVE"
+        ).first()
+        if default_warehouse and target_company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
+            default_warehouse = None
     else:
         sale_mov = db.query(InventoryMovement).filter(InventoryMovement.reference_id == sale.bill_number).first()
         if sale_mov:
@@ -1615,6 +1659,7 @@ def update_sale(
                             "sale_id": sale.id, 
                             "edit_delta": qty_from_39
                         },
+                        allow_negative_stock=True
                     )
                 if qty_from_2 > 0:
                     InventoryEventEngine.process_event(
@@ -1631,6 +1676,7 @@ def update_sale(
                             "sale_id": sale.id, 
                             "edit_delta": qty_from_2
                         },
+                        allow_negative_stock=True
                     )
             else:
                 event_type = "SALE" if delta_qty > 0 else "ADD"
@@ -1650,6 +1696,7 @@ def update_sale(
                         "sale_id": sale.id, 
                         "edit_delta": delta_qty
                     },
+                    allow_negative_stock=True
                 )
             
             if linked_transfer and dest_warehouse_id:
@@ -1669,6 +1716,7 @@ def update_sale(
                         "edit_delta": delta_qty, 
                         "linked_transfer": linked_transfer.id
                     },
+                    allow_negative_stock=True
                 )
             
     # Process removals (anything left in old_items was deleted from the UI)
@@ -1711,6 +1759,7 @@ def update_sale(
                         "edit_delta": -oi.quantity, 
                         "linked_transfer": linked_transfer.id
                     },
+                    allow_negative_stock=True
                 )
         db.delete(oi)
 
