@@ -143,7 +143,7 @@ class InventoryEventEngine:
                 inventory.available_qty = inventory.current_qty - (inventory.reserved_qty or 0)
                 
                 # Enforce available_qty >= 0 (unless allow_negative_stock is True)
-                if inventory.available_qty < 0 and not allow_negative_stock:
+                if inventory.available_qty < 0 and not allow_negative_stock and qty_changed <= 0:
                     print(f"[NEGATIVE STOCK ATTEMPT] product_sku={product_sku}, available_qty is negative, requested={quantity}, allowed_flag={allow_negative_stock}")
                     raise ValueError(f"Insufficient stock for {product_sku}: cannot deduct {quantity} because available stock would drop below zero")
                 

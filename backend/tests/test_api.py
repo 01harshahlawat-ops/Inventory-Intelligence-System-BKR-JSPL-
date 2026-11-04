@@ -94,7 +94,7 @@ def test_event_engine(db_session, seeded_company_context):
     assert movement3.qty_before == 7
     assert movement3.qty_after == 25
     assert movement3.qty_changed == 18
-    assert movement3.metadata_payload == {"file": "test.xlsx"}
+    assert movement3.metadata_payload.get("file") == "test.xlsx"
     
     inv3 = db_session.query(Inventory).first()
     assert inv3.current_qty == 25

@@ -365,6 +365,8 @@ class SeriesReportService:
         Shared exporter converting data rows into CSV or styled Excel (.xlsx).
         """
         num_cols = len(REPORT_COLUMNS)
+        amount_col_indices = {13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 26, 36, 37, 38}
+
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
@@ -377,7 +379,19 @@ class SeriesReportService:
             writer.writerow(REPORT_COLUMNS)
             # Data & Subtotals & Grand Total Rows
             for r in data_rows:
-                writer.writerow(r)
+                formatted_r = list(r)
+                for idx in range(len(formatted_r)):
+                    c_idx = idx + 1
+                    val = formatted_r[idx]
+                    if val is not None and val != "":
+                        if c_idx in amount_col_indices:
+                            try:
+                                formatted_r[idx] = f"{round(float(val), 2):.2f}"
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(val, float):
+                            formatted_r[idx] = f"{round(val, 2):.2f}"
+                writer.writerow(formatted_r)
 
             content = output.getvalue()
             filename = f"{filename_base}.csv"
@@ -461,8 +475,28 @@ class SeriesReportService:
                         cell.font = Font(name="Calibri", size=10, color="334155")
 
                     # Right-align numeric columns
-                    if c_idx in (12, 13, 14, 15, 16, 17, 21, 22, 24, 36, 37):
+                    if c_idx in (12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 26, 36, 37, 38):
                         cell.alignment = Alignment(horizontal="right")
+
+                    # Set fixed 2 decimal places for amounts/rates, integer format for quantity
+                    if c_idx in amount_col_indices and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            cell.value = round(fval, 2)
+                            cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
+                    elif c_idx == 12 and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            if fval.is_integer():
+                                cell.value = int(fval)
+                                cell.number_format = "0"
+                            else:
+                                cell.value = round(fval, 2)
+                                cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
 
                     val_len = len(str(r[c_idx-1] or ''))
                     if val_len > col_widths.get(c_idx, 0):
@@ -1168,6 +1202,7 @@ class SeriesReportService:
         file_format: str = "csv"
     ) -> Tuple[Union[str, bytes], str, str, int]:
         num_cols = len(PURCHASE_REPORT_COLUMNS)
+        purchase_amount_cols = {11, 12, 14}
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
@@ -1175,7 +1210,19 @@ class SeriesReportService:
             writer.writerow([title_str] * num_cols)
             writer.writerow(PURCHASE_REPORT_COLUMNS)
             for r in data_rows:
-                writer.writerow(r)
+                formatted_r = list(r)
+                for idx in range(len(formatted_r)):
+                    c_idx = idx + 1
+                    val = formatted_r[idx]
+                    if val is not None and val != "":
+                        if c_idx in purchase_amount_cols:
+                            try:
+                                formatted_r[idx] = f"{round(float(val), 2):.2f}"
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(val, float):
+                            formatted_r[idx] = f"{round(val, 2):.2f}"
+                writer.writerow(formatted_r)
             content = output.getvalue()
             filename = f"{filename_base}.csv"
             media_type = "text/csv"
@@ -1244,6 +1291,25 @@ class SeriesReportService:
                     if c_idx in (10, 11, 12, 14):
                         cell.alignment = Alignment(horizontal="right")
 
+                    if c_idx in purchase_amount_cols and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            cell.value = round(fval, 2)
+                            cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
+                    elif c_idx == 10 and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            if fval.is_integer():
+                                cell.value = int(fval)
+                                cell.number_format = "0"
+                            else:
+                                cell.value = round(fval, 2)
+                                cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
+
                     val_len = len(str(r[c_idx-1] or ''))
                     if val_len > col_widths.get(c_idx, 0):
                         col_widths[c_idx] = val_len
@@ -1286,12 +1352,26 @@ class SeriesReportService:
         report_type_label: str,
         file_format: str = "excel"
     ) -> Tuple[Union[str, bytes], str, str, int]:
+        inv_amount_cols = {17, 20, 21}
+        inv_qty_cols = {6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18}
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
             writer.writerow(INVENTORY_REGISTER_COLUMNS)
             for r in data_rows:
-                writer.writerow(r)
+                formatted_r = list(r)
+                for idx in range(len(formatted_r)):
+                    c_idx = idx + 1
+                    val = formatted_r[idx]
+                    if val is not None and val != "":
+                        if c_idx in inv_amount_cols:
+                            try:
+                                formatted_r[idx] = f"{round(float(val), 2):.2f}"
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(val, float):
+                            formatted_r[idx] = f"{round(val, 2):.2f}"
+                writer.writerow(formatted_r)
             content = output.getvalue()
             filename = f"{filename_base}.csv"
             media_type = "text/csv"
@@ -1349,8 +1429,27 @@ class SeriesReportService:
                     else:
                         cell.font = Font(name="Calibri", size=10, color="334155")
 
-                    if c_idx in (6, 7, 8, 12, 16, 17, 21):
+                    if c_idx in (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21):
                         cell.alignment = Alignment(horizontal="right")
+
+                    if c_idx in inv_amount_cols and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            cell.value = round(fval, 2)
+                            cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
+                    elif c_idx in inv_qty_cols and cell.value is not None and cell.value != "":
+                        try:
+                            fval = float(cell.value)
+                            if fval.is_integer():
+                                cell.value = int(fval)
+                                cell.number_format = "0"
+                            else:
+                                cell.value = round(fval, 2)
+                                cell.number_format = "0.00"
+                        except (ValueError, TypeError):
+                            pass
 
                     val_len = len(str(r[c_idx-1] or ''))
                     if val_len > col_widths[c_idx]:
@@ -1639,6 +1738,7 @@ class SeriesReportService:
         from openpyxl.utils import get_column_letter
 
         num_cols = len(ACCOUNTANT_SALES_RETURN_COLUMNS)
+        sales_return_amount_cols = {12, 15, 16, 21, 22, 24, 25, 26}
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
@@ -1646,7 +1746,19 @@ class SeriesReportService:
             writer.writerow([title_str] * num_cols)
             writer.writerow(ACCOUNTANT_SALES_RETURN_COLUMNS)
             for r in data_rows:
-                writer.writerow(r)
+                formatted_r = list(r)
+                for idx in range(len(formatted_r)):
+                    c_idx = idx + 1
+                    val = formatted_r[idx]
+                    if val is not None and val != "":
+                        if c_idx in sales_return_amount_cols:
+                            try:
+                                formatted_r[idx] = f"{round(float(val), 2):.2f}"
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(val, float):
+                            formatted_r[idx] = f"{round(val, 2):.2f}"
+                writer.writerow(formatted_r)
             content = output.getvalue()
             filename = f"{filename_base}.csv"
             media_type = "text/csv"
@@ -1726,11 +1838,30 @@ class SeriesReportService:
                 else:
                     cell.font = data_font
 
-                # Numeric right-alignment: Col 12, 14, 15, 16, 21, 22, 24, 25
-                if c_idx in (12, 14, 15, 16, 21, 22, 24, 25):
+                # Numeric right-alignment: Col 12, 14, 15, 16, 21, 22, 24, 25, 26
+                if c_idx in (12, 14, 15, 16, 21, 22, 24, 25, 26):
                     cell.alignment = Alignment(horizontal="right", vertical="center")
                 else:
                     cell.alignment = Alignment(horizontal="left", vertical="center")
+
+                if c_idx in sales_return_amount_cols and cell.value is not None and cell.value != "":
+                    try:
+                        fval = float(cell.value)
+                        cell.value = round(fval, 2)
+                        cell.number_format = "0.00"
+                    except (ValueError, TypeError):
+                        pass
+                elif c_idx == 14 and cell.value is not None and cell.value != "":
+                    try:
+                        fval = float(cell.value)
+                        if fval.is_integer():
+                            cell.value = int(fval)
+                            cell.number_format = "0"
+                        else:
+                            cell.value = round(fval, 2)
+                            cell.number_format = "0.00"
+                    except (ValueError, TypeError):
+                        pass
 
                 val_len = len(str(r[c_idx-1] or ""))
                 if val_len > col_widths.get(c_idx, 0):
@@ -2583,12 +2714,25 @@ class SeriesReportService:
             "Original Invoice Date", "Reason for Credit Note"
         ]
 
+        mtr_amount_cols = {30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77}
         if file_format.lower() == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
             writer.writerow(MTR_HEADERS)
             for r in data_rows:
-                writer.writerow(r)
+                formatted_r = list(r)
+                for idx in range(len(formatted_r)):
+                    c_idx = idx + 1
+                    val = formatted_r[idx]
+                    if val is not None and val != "":
+                        if c_idx in mtr_amount_cols:
+                            try:
+                                formatted_r[idx] = f"{round(float(val), 2):.2f}"
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(val, float):
+                            formatted_r[idx] = f"{round(val, 2):.2f}"
+                writer.writerow(formatted_r)
             content = output.getvalue()
             filename = f"{filename_base}.csv"
             media_type = "text/csv"
@@ -2614,6 +2758,31 @@ class SeriesReportService:
         ws.append(MTR_HEADERS)
         for r in data_rows:
             ws.append(r)
+
+        from openpyxl.styles import Alignment
+        for row_idx in range(2, ws.max_row + 1):
+            for c_idx in range(1, len(MTR_HEADERS) + 1):
+                cell = ws.cell(row=row_idx, column=c_idx)
+                if c_idx in mtr_amount_cols and cell.value is not None and cell.value != "":
+                    try:
+                        fval = float(cell.value)
+                        cell.value = round(fval, 2)
+                        cell.number_format = "0.00"
+                        cell.alignment = Alignment(horizontal="right")
+                    except (ValueError, TypeError):
+                        pass
+                elif c_idx == 10 and cell.value is not None and cell.value != "":
+                    try:
+                        fval = float(cell.value)
+                        if fval.is_integer():
+                            cell.value = int(fval)
+                            cell.number_format = "0"
+                        else:
+                            cell.value = round(fval, 2)
+                            cell.number_format = "0.00"
+                        cell.alignment = Alignment(horizontal="right")
+                    except (ValueError, TypeError):
+                        pass
 
         out = io.BytesIO()
         wb.save(out)
