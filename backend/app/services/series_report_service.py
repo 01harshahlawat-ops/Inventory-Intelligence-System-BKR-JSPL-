@@ -707,6 +707,7 @@ class SeriesReportService:
                 AmazonLiveAllocation.order_date
             )
             alloc_query = db.query(AmazonLiveAllocation).filter(
+                AmazonLiveAllocation.status == AllocationStatus.SHIPPED,
                 or_(
                     AmazonLiveAllocation.allocated_qty > 0,
                     AmazonLiveAllocation.reconciled_qty > 0
@@ -714,7 +715,14 @@ class SeriesReportService:
                 AmazonLiveAllocation.invoice_number.isnot(None),
                 AmazonLiveAllocation.invoice_number != '',
                 ~AmazonLiveAllocation.invoice_number.ilike('%-C-%'),
-                ~AmazonLiveAllocation.invoice_number.ilike('CN-%')
+                ~AmazonLiveAllocation.invoice_number.ilike('CN-%'),
+                ~AmazonLiveAllocation.amazon_line_item_id.ilike('%_REF%'),
+                ~AmazonLiveAllocation.amazon_line_item_id.ilike('%_CANCEL%'),
+                ~AmazonLiveAllocation.amazon_line_item_id.ilike('%_shipment_%'),
+                or_(
+                    AmazonLiveAllocation.net_amount.is_(None),
+                    AmazonLiveAllocation.net_amount > 0
+                )
             )
             if company_id and series_clean not in ("IN",):
                 has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
@@ -760,6 +768,26 @@ class SeriesReportService:
                 AmazonLiveAllocation.invoice_number.asc(),
                 AmazonLiveAllocation.id.asc()
             ).all()
+
+            # Deduplicate allocations by (order_id, sku, invoice_number) to ensure strictly 1 outward sales row per SKU per invoice
+            unique_allocs = []
+            seen_alloc_keys = {}
+            for a in amazon_allocations:
+                key = (
+                    (a.order_id or "").strip(),
+                    (a.sku or "").strip().upper(),
+                    (a.invoice_number or "").strip().upper()
+                )
+                if key not in seen_alloc_keys:
+                    seen_alloc_keys[key] = a
+                    unique_allocs.append(a)
+                else:
+                    prev = seen_alloc_keys[key]
+                    if (a.net_amount or 0) > (prev.net_amount or 0):
+                        idx = unique_allocs.index(prev)
+                        unique_allocs[idx] = a
+                        seen_alloc_keys[key] = a
+            amazon_allocations = unique_allocs
 
         d_from_str = date_from.strftime("%d/%m/%Y") if date_from else "01/10/2026"
         d_to_str = date_to.strftime("%d/%m/%Y") if date_to else datetime.utcnow().strftime("%d/%m/%Y")
