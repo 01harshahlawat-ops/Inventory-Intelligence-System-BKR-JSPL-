@@ -14,10 +14,12 @@ import {
   FiBox, FiLayers, FiDatabase, FiAlertCircle, FiTrendingDown, 
   FiBell, FiRefreshCw, FiShoppingCart, FiDollarSign, FiRefreshCcw, 
   FiClock, FiCheckCircle, FiXCircle, FiFileText, FiTruck, FiPlus,
-  FiFile, FiTool, FiActivity, FiList
+  FiFile, FiTool, FiActivity, FiList, FiGlobe
 } from 'react-icons/fi';
 import styles from './Overview.module.css';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import halteOrdersService from '../../services/halteOrdersService';
+import halteServiceBookingService from '../../services/halteServiceBookingService';
 
 const DashboardSkeleton = () => (
   <div className={styles.skeletonContainer}>
@@ -42,8 +44,22 @@ const Overview = () => {
   const { data: activityData, isPending: activityPending, error: activityError } = useDashboardActivity();
   const { data: alertsData, isPending: alertsPending, error: alertsError } = useDashboardAlerts();
 
+  const { data: halteOrderStats } = useQuery({
+    queryKey: ['halte-orders-stats'],
+    queryFn: () => halteOrdersService.getStats().catch(() => null),
+    staleTime: 60000
+  });
+
+  const { data: halteServiceStats } = useQuery({
+    queryKey: ['halte-service-stats'],
+    queryFn: () => halteServiceBookingService.getStats().catch(() => null),
+    staleTime: 60000
+  });
+
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['halte-orders-stats'] });
+    queryClient.invalidateQueries({ queryKey: ['halte-service-stats'] });
   };
 
   if (metricsPending || activityPending || alertsPending || returnPending) {
@@ -98,6 +114,20 @@ const Overview = () => {
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>Priority Operations</h2>
             <div className={styles.priorityGrid}>
+              <MetricCard 
+                title="Halte Web Repairs" 
+                value={(halteServiceStats?.summary?.ongoing ?? 0) + (halteServiceStats?.summary?.assigned ?? 0)} 
+                icon={FiTool} 
+                color="primary"
+                navigateTo="/service?tab=halte"
+              />
+              <MetricCard 
+                title="Halte Web Orders" 
+                value={halteOrderStats?.pending_deduction ?? 0} 
+                icon={FiGlobe} 
+                color="warning"
+                navigateTo={ROUTES.HALTE_ORDERS}
+              />
               <MetricCard 
                 title="Pending Dispatches" 
                 value={kpis?.pending_dispatches ?? 0} 

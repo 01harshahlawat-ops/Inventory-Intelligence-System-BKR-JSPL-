@@ -1,0 +1,376 @@
+.container {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.titleArea h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.titleArea p {
+  color: #6b7280;
+  margin: 0;
+  font-size: 14px;
+}
+
+.tabNav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid #e5e7eb;
+  margin-top: 10px;
+}
+
+.tabBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tabBtn:hover {
+  color: #1f2937;
+}
+
+.tabBtnActive {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.tabBadge {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 700;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.metricCard {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.metricCard:hover {
+  transform: translateY(-2px);
+}
+
+.metricLabel {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.metricValue {
+  font-size: 26px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.cardOngoing {
+  border-left: 4px solid #3b82f6;
+}
+
+.cardAssigned {
+  border-left: 4px solid #f59e0b;
+}
+
+.cardCompleted {
+  border-left: 4px solid #10b981;
+}
+
+.cardPaid {
+  border-left: 4px solid #6366f1;
+}
+
+.filterCard {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.searchBox {
+  flex: 1;
+  min-width: 250px;
+  position: relative;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 12px 8px 36px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
+  pointer-events: none;
+}
+
+.filterSelect {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  background-color: #ffffff;
+  color: #374151;
+}
+
+.tableCard {
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.tableResponsive {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.table th {
+  background-color: #f9fafb;
+  color: #4b5563;
+  font-weight: 600;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f3f4f6;
+  color: #1f2937;
+  vertical-align: middle;
+}
+
+.table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.bookingId {
+  font-weight: 700;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badgePending {
+  background-color: #ffedd5;
+  color: #9a3412;
+}
+
+.badgeAssigned {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.badgeOngoing {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.badgeCompleted {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badgeCancelled {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.badgeReturned {
+  background-color: #e0e7ff;
+  color: #3730a3;
+}
+
+.badgePaid {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badgeUnpaid {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.btnPrimary {
+  padding: 8px 16px;
+  background-color: #2563eb;
+  color: #ffffff;
+  border-radius: 6px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnPrimary:hover {
+  background-color: #1d4ed8;
+}
+
+.btnSecondary {
+  padding: 8px 14px;
+  background-color: #ffffff;
+  color: #374151;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnSecondary:hover {
+  background-color: #f9fafb;
+}
+
+.actionBtnGroup {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.statusSelect {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  font-size: 12px;
+  background-color: #ffffff;
+  cursor: pointer;
+}
+
+/* Modal styles */
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+
+.modalContent {
+  background: #ffffff;
+  border-radius: 10px;
+  max-width: 650px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+  padding: 24px;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.modalClose {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.modalGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.modalSection {
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.modalSection h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: #374151;
+  font-weight: 700;
+}

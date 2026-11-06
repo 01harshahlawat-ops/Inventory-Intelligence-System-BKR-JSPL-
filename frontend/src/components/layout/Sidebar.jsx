@@ -121,6 +121,7 @@ const Sidebar = () => {
       icon: FiTool,
       items: [
         { path: ROUTES.SERVICE_DASHBOARD, label: 'Service Dashboard', icon: FiPieChart },
+        { path: '/service?tab=halte', label: 'Halte Web Portal', icon: FiGlobe },
         { path: ROUTES.BKR_JOB_CARDS, label: 'BKR Job Cards', icon: FiFileText },
         { path: ROUTES.SERVICE_CREATE, label: 'New Service', icon: FiFileText },
         { path: ROUTES.SERVICE_RECORDS, label: 'Service Records', icon: FiList },
