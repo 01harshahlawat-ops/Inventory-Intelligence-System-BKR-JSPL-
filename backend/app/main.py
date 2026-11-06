@@ -58,6 +58,7 @@ from app.api.routers.service_reminders import router as service_reminders_router
 from app.api.routers.documents import router as documents_router
 from app.api.routers.bulk_upload import router as bulk_upload_router
 from app.api.routers.einvoice import router as einvoice_router
+from app.api.routers.halte_orders import router as halte_orders_router
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -295,6 +296,7 @@ app.include_router(damage_claims_router, prefix="/api")
 app.include_router(bkr_services_router, prefix="/api")
 app.include_router(admin_approvals_router, prefix="/api/admin-approvals", tags=["Admin Approvals"])
 app.include_router(einvoice_router, prefix="/api")
+app.include_router(halte_orders_router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Pydantic response models

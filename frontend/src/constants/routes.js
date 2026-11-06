@@ -49,4 +49,5 @@ export const ROUTES = {
   BKR_SERVICE_INVOICE: '/services/invoices/:id',
   HELP: '/help',
   ADMIN_APPROVALS: '/admin/approvals',
+  HALTE_ORDERS: '/halte-orders',
 };

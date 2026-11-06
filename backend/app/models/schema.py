@@ -1431,3 +1431,28 @@ class OfflinePurchase(Base):
     purchase = relationship("Purchase")
 
 
+class HalteWebsiteOrder(Base):
+    __tablename__ = "halte_website_orders"
+
+    order_id = Column(Integer, primary_key=True, index=True)
+    order_time = Column(DateTime, nullable=True)
+    order_state = Column(String(50), nullable=True, index=True)
+    total_amount = Column(Float, default=0.0)
+    customer_name = Column(String(255), nullable=True)
+    customer_phone = Column(String(50), nullable=True)
+    customer_email = Column(String(255), nullable=True)
+    ship_city = Column(String(100), nullable=True)
+    ship_state = Column(String(100), nullable=True)
+    ship_postal_code = Column(String(20), nullable=True)
+    shipping_address = Column(JSONB_COMPAT, nullable=True)
+    billing_address = Column(JSONB_COMPAT, nullable=True)
+    items = Column(JSONB_COMPAT, nullable=True)
+    inventory_status = Column(String(50), default="PENDING", nullable=False, index=True)
+    deducted_at = Column(DateTime, nullable=True)
+    deducted_movement_ids = Column(JSONB_COMPAT, default=list)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+

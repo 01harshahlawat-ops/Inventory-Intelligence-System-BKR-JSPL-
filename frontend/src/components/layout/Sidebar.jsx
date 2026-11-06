@@ -7,7 +7,7 @@ import useCompanyStore from '../../stores/useCompanyStore';
 import { 
   FiHome, FiBox, FiLayers, FiList, FiClock, FiFileText, FiDownload, 
   FiSettings, FiShoppingCart, FiUsers, FiDollarSign, FiRefreshCw, FiRepeat,
-  FiChevronDown, FiChevronRight, FiBriefcase, FiTool, FiPieChart, FiTruck
+  FiChevronDown, FiChevronRight, FiBriefcase, FiTool, FiPieChart, FiTruck, FiGlobe
 } from 'react-icons/fi';
 import { FaAmazon } from 'react-icons/fa';
 import styles from './Sidebar.module.css';
@@ -51,6 +51,7 @@ const Sidebar = () => {
       items: [
         { path: ROUTES.POS, label: 'Offline Sales', icon: FiShoppingCart },
         { path: ROUTES.POS_HISTORY, label: 'Sales History', icon: FiDollarSign },
+        { path: ROUTES.HALTE_ORDERS, label: 'Halte Orders Sync', icon: FiGlobe },
         { path: ROUTES.SALES_RETURNS, label: 'Sales Returns', icon: FiRefreshCw },
         { path: ROUTES.DELIVERY_CHALLANS, label: 'Delivery Challans', icon: FiFileText },
       ]
