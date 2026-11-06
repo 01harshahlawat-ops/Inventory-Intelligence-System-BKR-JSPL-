@@ -69,8 +69,10 @@ const HalteOrdersSync = () => {
   const handleSyncFromHalte = async () => {
     setSyncing(true);
     try {
+      const isAll = lookbackDays === 'all';
       const res = await halteOrdersService.syncOrders({
-        lookback_days: Number(lookbackDays),
+        lookback_days: isAll ? 365 : Number(lookbackDays),
+        sync_all: isAll,
         auto_deduct_paid: autoDeductPaid
       });
       addNotification({
@@ -204,6 +206,7 @@ const HalteOrdersSync = () => {
             <option value="30">Last 30 Days</option>
             <option value="60">Last 60 Days</option>
             <option value="90">Last 90 Days</option>
+            <option value="all">All Time (Complete History)</option>
           </select>
 
           <label className={styles.autoSyncToggle} title="If enabled, newly fetched paid/shipped orders will automatically deduct from JSPL inventory">

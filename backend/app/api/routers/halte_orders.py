@@ -29,6 +29,7 @@ JSPL_VSHB_WAREHOUSE_ID = 14
 class SyncRequest(BaseModel):
     lookback_days: int = 30
     auto_deduct_paid: bool = False
+    sync_all: bool = False
 
 class OrderItemSchema(BaseModel):
     sku: str
@@ -224,9 +225,12 @@ def sync_orders_from_halte(
     url = f"{HALTE_API_URL}/api/haltedb/orders"
     headers = {"x-api-key": HALTE_API_KEY}
     params = {
-        "format": "grouped",
-        "lookback_days": req.lookback_days
+        "format": "grouped"
     }
+    if req.sync_all:
+        params["sync_all"] = "true"
+    else:
+        params["lookback_days"] = req.lookback_days
 
     try:
         res = requests.get(url, headers=headers, params=params, timeout=25)
@@ -247,17 +251,14 @@ def sync_orders_from_halte(
             detail="Unexpected response format from Halte.in API"
         )
 
-    inserted_count = 0
-    updated_count = 0
-    auto_deducted_count = 0
+    from psycopg2.extras import execute_values, Json
 
+    rows = []
     for ord_data in raw_orders:
         order_id = ord_data.get("order_id")
         if not order_id:
             continue
-
-        existing = db.query(HalteWebsiteOrder).filter(HalteWebsiteOrder.order_id == order_id).first()
-
+        
         order_time_raw = ord_data.get("order_time")
         parsed_order_time = None
         if order_time_raw:
@@ -266,63 +267,81 @@ def sync_orders_from_halte(
             except Exception:
                 pass
 
-        if not existing:
-            # Create new order record
-            new_order = HalteWebsiteOrder(
-                order_id=order_id,
-                order_time=parsed_order_time,
-                order_state=ord_data.get("order_state", "UNPAID"),
-                total_amount=float(ord_data.get("total_amount") or 0.0),
-                customer_name=ord_data.get("customer_name"),
-                customer_phone=ord_data.get("customer_phone"),
-                customer_email=ord_data.get("customer_email"),
-                ship_city=ord_data.get("ship_city"),
-                ship_state=ord_data.get("ship_state"),
-                ship_postal_code=ord_data.get("ship_postal_code"),
-                shipping_address=ord_data.get("shipping_address"),
-                billing_address=ord_data.get("billing_address"),
-                items=ord_data.get("items", []),
-                inventory_status="PENDING"
-            )
-            db.add(new_order)
-            db.flush()
-            inserted_count += 1
-            current_target = new_order
-        else:
-            # Update state and details if changed
-            existing.order_state = ord_data.get("order_state", existing.order_state)
-            existing.total_amount = float(ord_data.get("total_amount") or existing.total_amount)
-            if ord_data.get("customer_name"):
-                existing.customer_name = ord_data.get("customer_name")
-            if ord_data.get("customer_phone"):
-                existing.customer_phone = ord_data.get("customer_phone")
-            if ord_data.get("ship_city"):
-                existing.ship_city = ord_data.get("ship_city")
-            if ord_data.get("ship_state"):
-                existing.ship_state = ord_data.get("ship_state")
-            if ord_data.get("items"):
-                existing.items = ord_data.get("items")
-            updated_count += 1
-            current_target = existing
+        rows.append((
+            order_id,
+            parsed_order_time,
+            ord_data.get("order_state", "UNPAID"),
+            float(ord_data.get("total_amount") or 0.0),
+            ord_data.get("customer_name"),
+            ord_data.get("customer_phone"),
+            ord_data.get("customer_email"),
+            ord_data.get("ship_city"),
+            ord_data.get("ship_state"),
+            ord_data.get("ship_postal_code"),
+            Json(ord_data.get("shipping_address") or {}),
+            Json(ord_data.get("billing_address") or {}),
+            Json(ord_data.get("items") or []),
+            "PENDING",
+            datetime.utcnow()
+        ))
 
-        # Check for auto-deduction
-        state_lower = (current_target.order_state or "").lower()
-        if req.auto_deduct_paid and state_lower in ["paid", "shipped", "delivered"] and current_target.inventory_status == "PENDING":
+    if rows:
+        raw_conn = db.connection().connection
+        with raw_conn.cursor() as cur:
+            query = """
+                INSERT INTO halte_website_orders (
+                    order_id,
+                    order_time,
+                    order_state,
+                    total_amount,
+                    customer_name,
+                    customer_phone,
+                    customer_email,
+                    ship_city,
+                    ship_state,
+                    ship_postal_code,
+                    shipping_address,
+                    billing_address,
+                    items,
+                    inventory_status,
+                    updated_at
+                ) VALUES %s
+                ON CONFLICT (order_id) DO UPDATE SET
+                    order_time = EXCLUDED.order_time,
+                    order_state = EXCLUDED.order_state,
+                    total_amount = EXCLUDED.total_amount,
+                    customer_name = COALESCE(EXCLUDED.customer_name, halte_website_orders.customer_name),
+                    customer_phone = COALESCE(EXCLUDED.customer_phone, halte_website_orders.customer_phone),
+                    customer_email = COALESCE(EXCLUDED.customer_email, halte_website_orders.customer_email),
+                    ship_city = COALESCE(EXCLUDED.ship_city, halte_website_orders.ship_city),
+                    ship_state = COALESCE(EXCLUDED.ship_state, halte_website_orders.ship_state),
+                    ship_postal_code = COALESCE(EXCLUDED.ship_postal_code, halte_website_orders.ship_postal_code),
+                    shipping_address = EXCLUDED.shipping_address,
+                    billing_address = EXCLUDED.billing_address,
+                    items = EXCLUDED.items,
+                    updated_at = EXCLUDED.updated_at
+            """
+            execute_values(cur, query, rows)
+        db.commit()
+
+    # Optional auto-deduction for paid orders
+    auto_deducted_count = 0
+    if req.auto_deduct_paid:
+        pending_orders = db.query(HalteWebsiteOrder).filter(
+            HalteWebsiteOrder.inventory_status == "PENDING",
+            func.lower(HalteWebsiteOrder.order_state).in_(["paid", "shipped", "delivered"])
+        ).all()
+        for ord_obj in pending_orders:
             try:
-                execute_order_deduction(db, current_target, user_id=getattr(current_user, "id", None))
+                execute_order_deduction(db, ord_obj, user_id=getattr(current_user, "id", None))
                 auto_deducted_count += 1
-            except Exception as deduct_err:
-                logger.error(f"Failed auto-deducting order {order_id}: {deduct_err}")
-                current_target.error_message = str(deduct_err)
-
-    db.commit()
+            except Exception as e:
+                logger.error(f"Auto-deduction error on order #{ord_obj.order_id}: {e}")
 
     return {
         "success": True,
-        "message": f"Halte orders sync completed. Synced {len(raw_orders)} orders ({inserted_count} new, {updated_count} updated, {auto_deducted_count} auto-deducted).",
+        "message": f"Halte orders sync completed. Synced {len(rows)} orders into database.",
         "total_fetched": len(raw_orders),
-        "inserted": inserted_count,
-        "updated": updated_count,
         "auto_deducted": auto_deducted_count
     }
 
