@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useJobCard, useServiceInvoice, useCreateServiceInvoice } from '../../hooks/useServices';
 import useCompanyStore from '../../stores/useCompanyStore';
 import InvoiceRenderer from '../../components/invoice/InvoiceRenderer';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './Service.module.css';
 
 const ServiceInvoicePreview = () => {
@@ -226,7 +227,7 @@ const ServiceInvoicePreview = () => {
   const customerName = jobCard?.customer_name;
   const address = jobCard?.address;
   const invoiceNum = 'DRAFT';
-  const date = new Date().toLocaleDateString();
+  const date = formatDate(new Date());
 
   return (
     <div className={styles.container}>
@@ -326,7 +327,7 @@ const ServiceInvoicePreview = () => {
                 <td style={{ padding: '0.5rem', borderRight: '1px solid #1f2937', textAlign: 'right' }}>
                   <input type="number" step="0.01" min="0" style={{ width: '100%', textAlign: 'right', border: '1px solid #d1d5db', padding: '0.25rem', boxSizing: 'border-box' }} value={item.rate} onChange={(e) => handleItemChange(idx, 'rate', parseFloat(e.target.value) || 0)} />
                 </td>
-                <td style={{ padding: '0.5rem', textAlign: 'right' }}>{(item.qty * item.rate).toFixed(2)}</td>
+                <td style={{ padding: '0.5rem', textAlign: 'right' }}>{Math.round(item.qty * item.rate)}</td>
                 <td style={{ padding: '0.5rem', textAlign: 'center' }} className="noPrint">
                   <button type="button" onClick={() => removeRow(idx)} style={{ color: '#ef4444', border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.25rem' }}>
                     &times;
@@ -347,25 +348,25 @@ const ServiceInvoicePreview = () => {
             <tr>
               <td colSpan="5" style={{ borderRight: '1px solid #1f2937', borderTop: '1px solid #1f2937' }}></td>
               <td style={{ padding: '0.5rem', fontWeight: 'bold', borderRight: '1px solid #1f2937', borderTop: '1px solid #1f2937', textAlign: 'right' }}>Taxable Amt</td>
-              <td style={{ padding: '0.5rem', textAlign: 'right', borderTop: '1px solid #1f2937' }}>{totals.total_amount.toFixed(2)}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right', borderTop: '1px solid #1f2937' }}>{Math.round(totals.total_amount)}</td>
               <td className="noPrint border-t border-gray-800" style={{ borderTop: '1px solid #1f2937' }}></td>
             </tr>
             <tr>
               <td colSpan="5" style={{ borderRight: '1px solid #1f2937' }}></td>
               <td style={{ padding: '0.5rem', fontWeight: 'bold', borderRight: '1px solid #1f2937', textAlign: 'right' }}>CGST</td>
-              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{totals.cgst_amount.toFixed(2)}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{Math.round(totals.cgst_amount)}</td>
               <td className="noPrint"></td>
             </tr>
             <tr>
               <td colSpan="5" style={{ borderRight: '1px solid #1f2937' }}></td>
               <td style={{ padding: '0.5rem', fontWeight: 'bold', borderRight: '1px solid #1f2937', textAlign: 'right' }}>SGST</td>
-              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{totals.sgst_amount.toFixed(2)}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{Math.round(totals.sgst_amount)}</td>
               <td className="noPrint"></td>
             </tr>
             <tr style={{ backgroundColor: '#f3f4f6', borderTop: '1px solid #1f2937' }}>
               <td colSpan="5" style={{ borderRight: '1px solid #1f2937' }}></td>
               <td style={{ padding: '0.5rem', fontWeight: 'bold', borderRight: '1px solid #1f2937', textAlign: 'right', fontSize: '1.125rem' }}>Grand Total</td>
-              <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', fontSize: '1.125rem' }}>₹ {totals.grand_total.toFixed(2)}</td>
+              <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', fontSize: '1.125rem' }}>₹ {Math.round(totals.grand_total)}</td>
               <td className="noPrint"></td>
             </tr>
           </tbody>

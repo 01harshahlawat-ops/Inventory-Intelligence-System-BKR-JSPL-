@@ -3,6 +3,7 @@ import { FiPlus, FiEye, FiCheck, FiX } from 'react-icons/fi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { salesReturnsService } from '../../services/salesReturns';
 import { handleApiError } from '../../utils/errorHandler';
+import { formatDate } from '../../utils/dateUtils';
 import useCompanyStore from '../../stores/useCompanyStore';
 import CreateReturnModal from './CreateReturnModal';
 import ViewReturnModal from './ViewReturnModal';
@@ -95,14 +96,14 @@ export default function SalesReturnsPage() {
               returns.map((ret) => (
                 <tr key={ret.id}>
                   <td><strong>{ret.return_number}</strong></td>
-                  <td>{new Date(ret.return_date).toLocaleDateString()}</td>
+                  <td>{formatDate(ret.return_date)}</td>
                   <td>{ret.customer_name || 'Walk-in Customer'}</td>
                   <td>
                     <span className={`${styles.badge} ${styles[ret.status?.toLowerCase()] || ''}`}>
                       {ret.status}
                     </span>
                   </td>
-                  <td>₹ {ret.grand_total?.toFixed(2)}</td>
+                  <td>₹ {Math.round(ret.grand_total || 0)}</td>
                   <td>
                     <div style={{ display: 'flex', gap: '12px' }}>
                       <button className={styles.actionButton} onClick={() => setViewReturn(ret)}>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useJobCard } from '../../hooks/useServices';
+import { formatDate } from '../../utils/dateUtils';
 import { FiPrinter, FiArrowLeft } from 'react-icons/fi';
 import styles from './Service.module.css'; // Use existing styles
 
@@ -39,7 +40,7 @@ const JobCardPrintView = () => {
           <div style={{ textAlign: 'right' }}>
             <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>JAGAN SHOPSMART PVT LTD</h2>
             <p style={{ margin: 0, color: '#4b5563' }}>Authorized Service Center</p>
-            <p style={{ margin: 0, color: '#4b5563' }}>Date: {new Date(jobCard.date).toLocaleDateString()}</p>
+            <p style={{ margin: 0, color: '#4b5563' }}>Date: {formatDate(jobCard.date)}</p>
           </div>
         </div>
 
@@ -90,9 +91,9 @@ const JobCardPrintView = () => {
                 <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
                   <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{idx + 1}</td>
                   <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{item.item_name}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{item.qty}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{item.rate?.toFixed(2)}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{(item.qty * item.rate).toFixed(2)}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{Math.round(item.qty || 0)}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{Math.round(item.rate || 0)}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{Math.round((item.qty || 0) * (item.rate || 0))}</td>
                 </tr>
               ))}
               {(!jobCard.items || jobCard.items.length === 0) && (

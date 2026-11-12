@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { reportsService } from '../../../services/reports';
 import { DataTable } from '../../../components/DataTable';
 import { ReportToolbar } from '../../../components/Reporting/ReportToolbar';
+import { formatDate } from '../../../utils/dateUtils';
 
 export const DefectiveReport = () => {
   const navigate = useNavigate();
@@ -30,10 +31,10 @@ export const DefectiveReport = () => {
   const totalPages = data?.total_pages || Math.ceil(total / limit) || 1;
 
   const columns = [
-    { key: 'created_at', label: 'Date', render: (val) => new Date(val).toLocaleDateString() },
+    { key: 'created_at', label: 'Date', render: (val) => formatDate(val) },
     { key: 'sku', label: 'SKU' },
     { key: 'product_name', label: 'Product Name' },
-    { key: 'quantity', label: 'Quantity' },
+    { key: 'quantity', label: 'Quantity', render: (val) => Math.round(Number(val || 0)) },
     { key: 'return_reason', label: 'Defect Reason' },
     { key: 'status', label: 'Status' }
   ];

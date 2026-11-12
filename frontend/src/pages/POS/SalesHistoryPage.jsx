@@ -7,6 +7,7 @@ import { handleApiError } from '../../utils/errorHandler';
 import { DataTable, TableHeader, TableRow, TablePagination } from '../../components/DataTable';
 import Button from '../../components/forms/Button';
 import styles from './SalesHistoryPage.module.css';
+import { formatDate } from '../../utils/dateUtils';
 import { FiEye, FiRefreshCw, FiCheck, FiX, FiClock, FiEdit, FiXCircle, FiDownload, FiUpload } from 'react-icons/fi';
 
 const SalesHistoryPage = () => {
@@ -48,13 +49,6 @@ const SalesHistoryPage = () => {
 
   const sales = data?.items || [];
   const total = data?.total || 0;
-
-  const formatDate = (isoString) => {
-    if (!isoString) return '-';
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return '-';
-    return d.toLocaleDateString();
-  };
 
   const retryTallyMutation = useMutation({
     mutationFn: posService.retryTallySync,
@@ -246,7 +240,7 @@ const SalesHistoryPage = () => {
         </>
       )
     },
-    { key: 'grand_total', label: 'Total (₹)', render: (val) => <span style={{fontWeight: '600'}}>₹{val.toFixed(2)}</span> },
+    { key: 'grand_total', label: 'Total (₹)', render: (val) => <span style={{fontWeight: '600'}}>₹{Math.round(val || 0)}</span> },
     {
       key: 'quantities',
       label: 'Sold/Ret/Net Qty',

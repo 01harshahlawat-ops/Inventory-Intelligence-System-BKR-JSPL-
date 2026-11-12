@@ -1053,7 +1053,7 @@ const EditInvoicePage = () => {
                       </div>
                     </div>
                     <div className={styles.searchItemRight}>
-                      <span className={styles.searchItemPrice}>₹{Number(result.default_price || 0).toFixed(2)}</span>
+                      <span className={styles.searchItemPrice}>₹{Math.round(Number(result.default_price || 0))}</span>
                       <span className={`${styles.searchStockBadge} ${result.available_stock < 5 ? styles.low : ''}`}>
                         Stock: {result.available_stock}
                       </span>
@@ -1164,16 +1164,16 @@ const EditInvoicePage = () => {
                         step="0.1"
                       />
                     </td>
-                    <td>₹{(item.taxable_amount || 0).toFixed(2)}</td>
+                    <td>₹{Math.round(item.taxable_amount || 0)}</td>
                     {isInterState ? (
-                      <td>₹{(item.igst || 0).toFixed(2)}</td>
+                      <td>₹{Math.round(item.igst || 0)}</td>
                     ) : (
                       <>
-                        <td>₹{(item.cgst || 0).toFixed(2)}</td>
-                        <td>₹{(item.sgst || 0).toFixed(2)}</td>
+                        <td>₹{Math.round(item.cgst || 0)}</td>
+                        <td>₹{Math.round(item.sgst || 0)}</td>
                       </>
                     )}
-                    <td className={styles.lineTotalCell}>₹{(item.line_total || 0).toFixed(2)}</td>
+                    <td className={styles.lineTotalCell}>₹{Math.round(item.line_total || 0)}</td>
                     <td>
                       <button className={styles.removeBtn} onClick={() => removeFromCart(index)}>
                         <FiX />
@@ -1233,28 +1233,28 @@ const EditInvoicePage = () => {
 
           <div className={styles.summaryRow}>
             <span>Taxable Amount</span>
-            <span>₹{totals.taxable.toFixed(2)}</span>
+            <span>₹{Math.round(totals.taxable)}</span>
           </div>
           {isInterState ? (
             <div className={styles.summaryRow}>
               <span>IGST</span>
-              <span>₹{totals.igst.toFixed(2)}</span>
+              <span>₹{Math.round(totals.igst)}</span>
             </div>
           ) : (
             <>
               <div className={styles.summaryRow}>
                 <span>CGST</span>
-                <span>₹{totals.cgst.toFixed(2)}</span>
+                <span>₹{Math.round(totals.cgst)}</span>
               </div>
               <div className={styles.summaryRow}>
                 <span>SGST</span>
-                <span>₹{totals.sgst.toFixed(2)}</span>
+                <span>₹{Math.round(totals.sgst)}</span>
               </div>
             </>
           )}
           <div className={`${styles.summaryRow} ${styles.total}`}>
             <span>Grand Total</span>
-            <span>₹{totals.grand.toFixed(2)}</span>
+            <span>₹{Math.round(totals.grand)}</span>
           </div>
 
           {/* Invoice Series Dropdown */}

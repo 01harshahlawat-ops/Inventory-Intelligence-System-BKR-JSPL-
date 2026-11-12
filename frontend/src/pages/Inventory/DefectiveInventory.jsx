@@ -4,6 +4,7 @@ import api from '../../services/api';
 import PageContainer from '../../components/layout/PageContainer';
 import { Card } from '../../components/Card/Card';
 import { DataTable, TableHeader, TableRow } from '../../components/DataTable';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './DefectiveInventory.module.css';
 
 const DefectiveInventory = () => {
@@ -80,7 +81,7 @@ const DefectiveInventory = () => {
                                             sku: item.sku_snapshot,
                                             product: item.product_name_snapshot,
                                             returnId: item.amazon_return_id,
-                                            qty: item.quantity,
+                                            qty: Math.round(item.quantity || 0),
                                             reason: item.return_reason,
                                             remarks: item.inspection_notes || '-',
                                             status: (
@@ -88,7 +89,7 @@ const DefectiveInventory = () => {
                                                     {item.status.replace('_', ' ')}
                                                 </span>
                                             ),
-                                            date: item.inspection_date ? new Date(item.inspection_date).toLocaleDateString() : '-'
+                                            date: formatDate(item.inspection_date)
                                         }}
                                         columns={[
                                             { key: 'sku', label: 'SKU' },

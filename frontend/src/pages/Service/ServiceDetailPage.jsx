@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import useCompanyStore from '../../stores/useCompanyStore';
+import { formatDate } from '../../utils/dateUtils';
 import { FiArrowLeft, FiTool, FiUser, FiMapPin, FiInfo, FiCheckCircle, FiFileText, FiPrinter } from 'react-icons/fi';
 import styles from './ServiceDetailPage.module.css';
 
@@ -77,7 +78,7 @@ export default function ServiceDetailPage() {
               <div className={styles.iconBox}><FiFileText /></div>
               <h1 className={styles.pageTitle}>Service Record</h1>
             </div>
-            <p className={styles.pageSubtitle}>#{service.service_number} • Created {new Date(service.created_at || service.service_date).toLocaleDateString()}</p>
+            <p className={styles.pageSubtitle}>#{service.service_number} • Created {formatDate(service.created_at || service.service_date)}</p>
           </div>
           
           <div className={styles.actionWrapper}>

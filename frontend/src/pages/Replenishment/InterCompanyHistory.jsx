@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './InterCompanyHistory.module.css';
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import { useNotificationStore } from '../../stores/notificationStore';
 
 const InterCompanyHistory = () => {
@@ -57,12 +58,12 @@ const InterCompanyHistory = () => {
                 transfers.map((trf) => (
                   <tr key={trf.id}>
                     <td>{trf.transfer_number}</td>
-                    <td>{new Date(trf.created_at).toLocaleDateString()}</td>
+                    <td>{formatDate(trf.created_at)}</td>
                     <td>{trf.from_company_name}</td>
                     <td>{trf.to_company_name}</td>
                     <td>{trf.invoice_id || '-'}</td>
-                    <td>{trf.total_qty}</td>
-                    <td>₹{trf.total_amount?.toFixed(2)}</td>
+                    <td>{Math.round(trf.total_qty || 0)}</td>
+                    <td>₹{Math.round(trf.total_amount || 0)}</td>
                     <td>
                       <span className={`${styles.status} ${styles[(trf.status || '').toLowerCase()] || ''}`}>
                         {trf.status}

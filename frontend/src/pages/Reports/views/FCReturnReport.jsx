@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { reportsService } from '../../../services/reports';
 import { DataTable } from '../../../components/DataTable';
 import { ReportToolbar } from '../../../components/Reporting/ReportToolbar';
+import { formatDate } from '../../../utils/dateUtils';
 
 export const FCReturnReport = () => {
   const navigate = useNavigate();
@@ -30,9 +31,9 @@ export const FCReturnReport = () => {
   const totalPages = data?.total_pages || Math.ceil(total / limit) || 1;
 
   const columns = [
-    { key: 'created_at', label: 'Date', render: (val) => new Date(val).toLocaleDateString() },
+    { key: 'created_at', label: 'Date', render: (val) => formatDate(val) },
     { key: 'return_number', label: 'Return ID' },
-    { key: 'total_returned_qty', label: 'Total Quantity' },
+    { key: 'total_returned_qty', label: 'Total Quantity', render: (val) => Math.round(Number(val || 0)) },
     { key: 'status', label: 'Status' }
   ];
 

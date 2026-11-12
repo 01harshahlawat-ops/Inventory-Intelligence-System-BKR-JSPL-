@@ -4,6 +4,7 @@ import api from '../../services/api';
 import halteServiceBookingService from '../../services/halteServiceBookingService';
 import { useNotificationStore } from '../../stores/notificationStore';
 import useCompanyStore from '../../stores/useCompanyStore';
+import { formatDate } from '../../utils/dateUtils';
 import { 
   FiTool, FiGlobe, FiClock, FiCheckCircle, FiSearch, 
   FiRefreshCw, FiEye, FiX, FiPlus, FiAlertCircle 
@@ -123,20 +124,6 @@ export default function ServiceDashboard() {
       });
     } finally {
       setUpdatingId(null);
-    }
-  };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '-';
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-    } catch (e) {
-      return dateStr;
     }
   };
 

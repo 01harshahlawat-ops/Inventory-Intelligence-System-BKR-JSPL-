@@ -1,16 +1,8 @@
 import React from 'react';
 import styles from '../InvoiceRenderer.module.css';
+import { formatDate } from '../../../utils/dateUtils';
 
 const InvoiceMeta = ({ invoice }) => {
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
 
   return (
     <div className={styles.metaContainer}>

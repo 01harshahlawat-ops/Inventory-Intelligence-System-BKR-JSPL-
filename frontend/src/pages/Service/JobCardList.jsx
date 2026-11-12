@@ -5,6 +5,7 @@ import Button from '../../components/forms/Button';
 import PageContainer from '../../components/layout/PageContainer';
 import { Card } from '../../components/Card/Card';
 import { DataTable, TableHeader } from '../../components/DataTable';
+import { formatDate } from '../../utils/dateUtils';
 import { FiPlus, FiEye, FiPrinter, FiFileText } from 'react-icons/fi';
 
 const JobCardList = () => {
@@ -49,7 +50,7 @@ const JobCardList = () => {
                 cards.map((card) => (
                   <tr key={card.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td>{card.service_number}</td>
-                    <td>{card.service_date ? new Date(card.service_date).toLocaleDateString() : '-'}</td>
+                    <td>{formatDate(card.service_date)}</td>
                     <td>{card.customer_name_snapshot}</td>
                     <td>{card.machine_type} {card.brand ? `(${card.brand})` : ''}</td>
                     <td>

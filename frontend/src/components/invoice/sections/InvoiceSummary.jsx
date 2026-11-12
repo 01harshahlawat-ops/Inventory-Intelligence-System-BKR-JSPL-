@@ -5,7 +5,7 @@ import { amountInWords } from '../../../utils/amountInWords';
 const formatNum = (val) => {
   if (val === null || val === undefined || val === '') return '';
   const n = Number(val);
-  return isNaN(n) ? '' : n.toFixed(2);
+  return isNaN(n) ? '' : String(Math.round(n));
 };
 
 const InvoiceSummary = ({ company, customer, items = [], totals }) => {
@@ -62,10 +62,10 @@ const InvoiceSummary = ({ company, customer, items = [], totals }) => {
     slabs[targetKey].igst += itemIgst;
   });
 
-  const rawTotalTax = isInterState ? totalIGST : (totalCGST + totalSGST);
-  const rawGrandTotal = totalTaxable + rawTotalTax;
-  const roundedGrandTotal = totals?.grand_total ? Math.round(totals.grand_total) : Math.round(rawGrandTotal);
-  const roundOff = parseFloat((roundedGrandTotal - rawGrandTotal).toFixed(2));
+  const rawTotalTax = isInterState ? Math.round(totalIGST) : (Math.round(totalCGST) + Math.round(totalSGST));
+  const rawGrandTotal = Math.round(totalTaxable) + rawTotalTax;
+  const roundedGrandTotal = totals?.grand_total ? Math.round(totals.grand_total) : rawGrandTotal;
+  const roundOff = Math.round(roundedGrandTotal - rawGrandTotal);
 
   // Robust BKR vs JSPL identification
   const coId = company?.id || company?.company_id;
@@ -102,7 +102,7 @@ const InvoiceSummary = ({ company, customer, items = [], totals }) => {
           <tr>
             <td className={styles.emptyLeftCell}></td>
             <td className={styles.totalsLabelCell}>TOTAL</td>
-            <td className={styles.totalsQtyCell}>{totalSoldQty}</td>
+            <td className={styles.totalsQtyCell}>{Math.round(totalSoldQty)}</td>
             <td className={styles.totalsValueCell}>{formatNum(totalGross)}</td>
           </tr>
           {totalDiscount > 0 && (
@@ -137,7 +137,7 @@ const InvoiceSummary = ({ company, customer, items = [], totals }) => {
               <strong>Rs.:</strong>{rawWords}    Only
             </td>
             <td colSpan="2" className={styles.totalsLabelCell}>Round Off</td>
-            <td className={styles.totalsValueCell}>{roundOff >= 0 ? formatNum(roundOff) : formatNum(roundOff)}</td>
+            <td className={styles.totalsValueCell}>{formatNum(roundOff) || '0'}</td>
           </tr>
           <tr className={styles.netAmountRow}>
             <td className={styles.emptyLeftCell}></td>
@@ -159,7 +159,7 @@ const InvoiceSummary = ({ company, customer, items = [], totals }) => {
               </tr>
               {[5, 12, 18, 28].map(rate => {
                 const slab = slabs[rate];
-                const halfRate = rate / 2;
+                const halfRate = Math.round(rate / 2);
                 return (
                   <tr key={rate}>
                     <td className={styles.gstMatrixLabel}>GST SALE {rate}% :</td>
@@ -168,7 +168,7 @@ const InvoiceSummary = ({ company, customer, items = [], totals }) => {
                     <td className={styles.gstMatrixVal}>{!isInterState && slab.sgst_utgst > 0 ? formatNum(slab.sgst_utgst) : ''}</td>
                     <td className={styles.gstMatrixTag}>CGST {halfRate}%:</td>
                     <td className={styles.gstMatrixVal}>{!isInterState && slab.cgst > 0 ? formatNum(slab.cgst) : ''}</td>
-                    <td className={styles.gstMatrixTag}>IGST {rate} %:</td>
+                    <td className={styles.gstMatrixTag}>IGST {rate}%:</td>
                     <td className={styles.gstMatrixVal}>{isInterState && slab.igst > 0 ? formatNum(slab.igst) : ''}</td>
                   </tr>
                 );

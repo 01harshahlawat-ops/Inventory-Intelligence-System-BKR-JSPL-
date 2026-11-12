@@ -166,15 +166,15 @@ const HalteOrdersSync = () => {
     if (!isoStr) return '-';
     try {
       const d = new Date(isoStr);
-      return d.toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      if (isNaN(d.getTime())) return String(isoStr);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      const hours = String(d.getHours()).padStart(2, '0');
+      const mins = String(d.getMinutes()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${mins}`;
     } catch (e) {
-      return isoStr;
+      return String(isoStr);
     }
   };
 

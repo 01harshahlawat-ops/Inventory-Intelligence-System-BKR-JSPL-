@@ -3,12 +3,10 @@ import styles from './DeliveryChallanRenderer.module.css';
 import InvoiceHeader from '../invoice/sections/InvoiceHeader';
 import InvoiceParties from '../invoice/sections/InvoiceParties';
 import { amountInWords } from '../../utils/amountInWords';
+import { formatDate } from '../../utils/dateUtils';
 
 const formatCurrency = (val) => {
-  return Number(val || 0).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+  return Math.round(Number(val || 0)).toLocaleString('en-IN');
 };
 
 export default function DeliveryChallanRenderer({ challan }) {
@@ -65,7 +63,7 @@ export default function DeliveryChallanRenderer({ challan }) {
               <strong>Challan No.:</strong> {challan.challan_number}
             </div>
             <div className={styles.metaItem}>
-              <strong>Dated:</strong> {new Date(challan.challan_date).toLocaleDateString('en-IN')}
+              <strong>Dated:</strong> {formatDate(challan.challan_date)}
             </div>
             {challan.vehicle_number && (
               <div className={styles.metaItem}>
