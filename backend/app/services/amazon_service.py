@@ -19,36 +19,50 @@ class AmazonService:
     @staticmethod
     def normalize_amazon_sku(raw_sku: str, known_skus: dict, name_to_sku: dict = None, title: str = "") -> Optional[str]:
         """
-        Normalizes Amazon SKUs according to catalog rules:
-        Keeps only the first 6 digits/characters and trims anything past the 1st 6,
-        matching against master products.
-        Falls back to standard 6-character pattern matching in raw_sku, title, or product names.
+        Normalizes Amazon SKUs strictly preserving variant suffixes per catalog rules:
+        - Pattern: 2 alphabetic letters followed by 4+ digits and optional hyphen/space variant suffix.
+        - Never strips variant suffixes (e.g. -1, -P, -S) to merge into a base SKU.
         """
         if not raw_sku:
             return None
-        clean = str(raw_sku).strip().upper()
-        
+        clean = " ".join(str(raw_sku).strip().upper().split())
+
         # 1. Exact match in known catalog
         if clean in known_skus:
             return known_skus[clean]
-            
-        # 2. Keep only first 6 digits/characters (trim anything past 1st 6)
-        if len(clean) >= 6:
-            candidate_6 = clean[:6]
-            if candidate_6 in known_skus:
-                return known_skus[candidate_6]
-                
-        # 3. Standard 6-char pattern: 2 alpha + 4 digits (e.g. LG0831)
-        m = re.search(r'\b[A-Z]{2}\d{4}\b', clean)
-        if m and m.group(0) in known_skus:
-            return known_skus[m.group(0)]
-            
-        # 4. Check in item title if present
+
+        # 2. Extract full SKU variant pattern (preserving hyphenated suffixes)
+        variant_match = re.search(r'\b([A-Z]{2}\d{4}(?:-[A-Z0-9]+)+)\b', clean)
+        if variant_match:
+            token = variant_match.group(1)
+            if token in known_skus:
+                return known_skus[token]
+            # Strict variant isolation: never downgrade a variant SKU to its base SKU
+            return None
+
+        # Check space-separated numeric variant like 'LG0726 1'
+        space_variant = re.search(r'\b([A-Z]{2}\d{4}\s+[A-Z0-9]{1,3})\b', clean)
+        if space_variant:
+            token = space_variant.group(1)
+            if token in known_skus:
+                return known_skus[token]
+            return None
+
+        # 3. Standalone 6+ digit base SKU (only when no variant suffix is attached)
+        base_match = re.search(r'\b([A-Z]{2}\d{4,})\b', clean)
+        if base_match and base_match.group(1) in known_skus:
+            return known_skus[base_match.group(1)]
+
+        # 4. Check in item title if present (preserving any variant suffix)
         if title:
-            m_title = re.search(r'\b[A-Z]{2}\d{4}\b', title.upper())
-            if m_title and m_title.group(0) in known_skus:
-                return known_skus[m_title.group(0)]
-                
+            title_upper = title.upper()
+            m_title_var = re.search(r'\b([A-Z]{2}\d{4}(?:-[A-Z0-9]+)+)\b', title_upper)
+            if m_title_var:
+                return known_skus.get(m_title_var.group(1))
+            m_title = re.search(r'\b([A-Z]{2}\d{4,})\b', title_upper)
+            if m_title and m_title.group(1) in known_skus:
+                return known_skus[m_title.group(1)]
+
         # 5. Check if raw_sku is a model number in product names (e.g., 18980-28 -> LG0995)
         if name_to_sku:
             for p_name, p_sku in name_to_sku.items():
@@ -226,7 +240,7 @@ class AmazonService:
                     wh_obj = db.query(Warehouse.code).filter(Warehouse.id == target_warehouse_id).first()
                     if wh_obj and wh_obj[0]:
                         wh_code = wh_obj[0].upper()
-                # Resolve clean sequential invoice number (e.g. IN-518, IN-633, BLR4-742)
+                # Resolve authoritative Amazon invoice number if provided; never synthesize fake sequential IN-xxx numbers
                 existing_inv = db.query(AmazonLiveAllocation.invoice_number).filter(
                     AmazonLiveAllocation.order_id == order_id,
                     AmazonLiveAllocation.invoice_number.isnot(None),
@@ -237,24 +251,8 @@ class AmazonService:
                     invoice_number = existing_inv[0]
                 elif raw_inv_no:
                     invoice_number = str(raw_inv_no).strip()
-                elif "batch_order_inv" in counters and order_id in counters["batch_order_inv"]:
-                    invoice_number = counters["batch_order_inv"][order_id]
                 else:
-                    try:
-                        from sqlalchemy import text
-                        max_num_res = db.execute(
-                            text("SELECT max(CAST(SUBSTRING(invoice_number FROM '^[A-Z0-9]+-([0-9]{1,4})$') AS INTEGER)) FROM amazon_live_allocations WHERE invoice_number ~ ('^' || :wh || '-[0-9]{1,4}$');"),
-                            {"wh": wh_code}
-                        ).scalar()
-                        next_num = (max_num_res or 0) + 1
-                        invoice_number = f"{wh_code}-{next_num}"
-                    except Exception:
-                        order_suffix = order_id.replace("-", "")[-6:] if order_id else "000000"
-                        invoice_number = f"{wh_code}-{order_suffix}"
-                    
-                    if "batch_order_inv" not in counters:
-                        counters["batch_order_inv"] = {}
-                    counters["batch_order_inv"][order_id] = invoice_number
+                    invoice_number = None
 
                 # If this order was already known and had no items fetched
                 if order.get("is_known_order") and not order.get("items"):

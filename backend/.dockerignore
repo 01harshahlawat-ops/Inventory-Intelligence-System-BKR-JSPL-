@@ -1,0 +1,46 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local secrets and databases must never enter Docker build context
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime data directories (created fresh in container)
+outputs/
+uploads/
+logs/
+app/logs/
+app/outputs/
+app/uploads/
+
+# Tests and temporary scripts
+tests/
+tmp_*.py
+test_*.py
+check_*.py
+query_*.py
+fix_*.py
+clean_*.py
+backfill_*.py
+reconcile_*.py
+restore_*.py
+sync_*.py
+update_*.py
+verify_*.py
+inspect_*.py
+debug_*.py
+migrate_*.py
+import_*.py
+seed_*.py
+export_*.py
+patch_*.py
+.DS_Store

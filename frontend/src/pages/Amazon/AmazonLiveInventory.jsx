@@ -66,8 +66,9 @@ const AmazonLiveInventory = () => {
     queryKey: ['amazon', 'sync-status', companyId],
     queryFn: amazonService.getSyncStatus,
     refetchInterval: (query) => {
-      return query?.state?.data?.status === 'IN_PROGRESS' ? 3000 : 30000;
+      return query?.state?.data?.status === 'IN_PROGRESS' ? 10000 : 120000;
     },
+    refetchIntervalInBackground: false,
   });
 
   const isSyncInProgress = syncStatus?.status === 'IN_PROGRESS';
@@ -81,7 +82,8 @@ const AmazonLiveInventory = () => {
   } = useQuery({
     queryKey: ['amazon', 'live-inventory', companyId],
     queryFn: amazonService.getLiveInventory,
-    refetchInterval: isSyncInProgress ? 3000 : false,
+    refetchInterval: isSyncInProgress ? 15000 : false,
+    refetchIntervalInBackground: false,
   });
 
   // 3. Fetch DLQ / Quarantined SKUs
@@ -92,7 +94,8 @@ const AmazonLiveInventory = () => {
   } = useQuery({
     queryKey: ['amazon', 'dlq', companyId],
     queryFn: () => amazonService.getDlqRecords(100),
-    refetchInterval: isSyncInProgress ? 5000 : false,
+    refetchInterval: isSyncInProgress ? 15000 : false,
+    refetchIntervalInBackground: false,
   });
 
   // 4. Fetch FC Inventory Summary

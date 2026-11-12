@@ -1,5 +1,7 @@
 import os
 import io
+import re
+from datetime import datetime
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
@@ -40,9 +42,17 @@ def clean_float(val):
 def clean_dt(val):
     if pd.isna(val) or val is None:
         return None
+    if isinstance(val, pd.Timestamp):
+        return val.to_pydatetime().replace(microsecond=0)
+    if isinstance(val, datetime):
+        return val.replace(microsecond=0)
     try:
-        dt = pd.to_datetime(val, dayfirst=True)
-        return dt.to_pydatetime()
+        s = str(val).strip()
+        is_iso = bool(re.match(r"^\d{4}-\d{2}-\d{2}", s))
+        dt = pd.to_datetime(s, dayfirst=not is_iso)
+        if pd.isna(dt):
+            return None
+        return dt.to_pydatetime().replace(microsecond=0)
     except Exception:
         return None
 
@@ -132,24 +142,21 @@ def ingest_amazon_mtr(
     """)
     existing_records = cur.fetchall()
 
-    db_by_order_sku = {}
-    db_by_order_base_sku = {}
+    db_by_order_sku_status = {}
     db_by_line_item_id = {}
 
     for row in existing_records:
         rec_id, o_id, sku, line_id, wid, stat = row
         o_clean = (o_id or "").strip()
-        s_clean = (sku or "").strip().upper()
-        base_s = s_clean.split("-")[0]
+        s_clean = " ".join((sku or "").strip().upper().split())
         l_clean = (line_id or "").strip()
+        stat_clean = (stat or "").strip().upper()
 
-        if o_clean and s_clean:
-            db_by_order_sku[(o_clean, s_clean)] = rec_id
-        if o_clean and base_s:
-            if (o_clean, base_s) not in db_by_order_base_sku:
-                db_by_order_base_sku[(o_clean, base_s)] = rec_id
+        if o_clean and s_clean and stat_clean:
+            if (o_clean, s_clean, stat_clean) not in db_by_order_sku_status:
+                db_by_order_sku_status[(o_clean, s_clean, stat_clean)] = rec_id
         if l_clean:
-            db_by_line_item_id[l_clean] = rec_id
+            db_by_line_item_id[l_clean] = (rec_id, stat_clean)
 
     unified_records = {}
     ref_counts = {}
@@ -161,8 +168,7 @@ def ingest_amazon_mtr(
         if not order_id or not sku:
             continue
 
-        sku_upper = sku.upper()
-        base_sku = sku_upper.split("-")[0]
+        sku_upper = " ".join(sku.upper().split())
 
         raw_line_id = clean_str(row.get("Shipment Item Id"))
         if raw_line_id and "." in raw_line_id:
@@ -184,7 +190,7 @@ def ingest_amazon_mtr(
         elif tx_type in ("Cancel", "Cancelled"):
             line_item_id = f"{raw_line_id}_CANCEL"
         elif tx_type == "FreeReplacement":
-            line_item_id = raw_line_id
+            line_item_id = f"{raw_line_id}_REPL"
         else:
             line_item_id = raw_line_id
 
@@ -228,8 +234,8 @@ def ingest_amazon_mtr(
             "company_id": company_id,
             "order_id": order_id,
             "line_item_id": line_item_id,
+            "raw_line_id": raw_line_id,
             "sku_upper": sku_upper,
-            "base_sku": base_sku,
             "warehouse_id": warehouse_id,
             "amazon_network": amazon_network,
             "qty": qty,
@@ -255,17 +261,28 @@ def ingest_amazon_mtr(
     for item_key, item in unified_records.items():
         order_id = item["order_id"]
         line_item_id = item["line_item_id"]
+        raw_line_id = item["raw_line_id"]
         sku_upper = item["sku_upper"]
-        base_sku = item["base_sku"]
+        item_status = item["status"]
 
         matched_id = None
-        if line_item_id in db_by_line_item_id:
-            matched_id = db_by_line_item_id[line_item_id]
-        elif item["status"] == "SHIPPED":
-            if (order_id, sku_upper) in db_by_order_sku and db_by_order_sku[(order_id, sku_upper)] not in matched_db_ids:
-                matched_id = db_by_order_sku[(order_id, sku_upper)]
-            elif (order_id, base_sku) in db_by_order_base_sku and db_by_order_base_sku[(order_id, base_sku)] not in matched_db_ids:
-                matched_id = db_by_order_base_sku[(order_id, base_sku)]
+        if line_item_id in db_by_line_item_id and db_by_line_item_id[line_item_id][0] not in matched_db_ids:
+            matched_id = db_by_line_item_id[line_item_id][0]
+        elif (
+            item_status == "CANCELLED"
+            and raw_line_id in db_by_line_item_id
+            and db_by_line_item_id[raw_line_id][1] == "CANCELLED"
+            and db_by_line_item_id[raw_line_id][0] not in matched_db_ids
+        ):
+            matched_id = db_by_line_item_id[raw_line_id][0]
+        elif (order_id, sku_upper, item_status) in db_by_order_sku_status:
+            cand_id = db_by_order_sku_status[(order_id, sku_upper, item_status)]
+            if cand_id not in matched_db_ids:
+                matched_id = cand_id
+        elif item_status == "SHIPPED" and (order_id, sku_upper, "PENDING") in db_by_order_sku_status:
+            cand_id = db_by_order_sku_status[(order_id, sku_upper, "PENDING")]
+            if cand_id not in matched_db_ids:
+                matched_id = cand_id
 
         if matched_id:
             matched_db_ids.add(matched_id)

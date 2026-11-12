@@ -48,7 +48,8 @@ const AmazonReturns = () => {
             const data = await amazonReturnsService.getSyncStatus();
             return data;
         },
-        refetchInterval: 10000 // poll every 10s
+        refetchInterval: (query) => (query?.state?.data?.status === 'Running' ? 15000 : 120000),
+        refetchIntervalInBackground: false
     });
 
     const manualSyncMutation = useMutation({

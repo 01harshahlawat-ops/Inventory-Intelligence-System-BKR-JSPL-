@@ -12,6 +12,7 @@ from typing import List
 import pandas as pd
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -218,6 +219,7 @@ env_origins = os.getenv("ALLOWED_ORIGINS", "")
 if env_origins:
     origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
 
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -243,13 +245,14 @@ async def validation_exception_handler(request, exc):
 
 
 @app.get("/api/debug/logs")
-def get_debug_logs():
+def get_debug_logs(lines: int = 200):
     import os
     try:
+        safe_lines = max(1, min(lines, 2000))
         log_path = os.path.join(LOGS_DIR, "app.log")
         with open(log_path, "r") as f:
-            lines = f.readlines()
-            return {"logs": lines[-10000:]}
+            all_lines = f.readlines()
+            return {"logs": all_lines[-safe_lines:]}
     except Exception as e:
         return {"error": str(e)}
 

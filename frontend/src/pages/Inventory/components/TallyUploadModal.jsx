@@ -17,8 +17,8 @@ const TallyUploadModal = ({ isOpen, onClose, warehouses }) => {
   const [previewItems, setPreviewItems] = useState(null);
   const navigate = useNavigate();
   
-  // Fetch products for manual mapping
-  const { data: productsData } = useProducts({ limit: 10000 });
+  // Fetch products for manual mapping only when the modal is open
+  const { data: productsData } = useProducts({ limit: 10000, enabled: Boolean(isOpen) });
   const products = Array.isArray(productsData) ? productsData : [];
 
 

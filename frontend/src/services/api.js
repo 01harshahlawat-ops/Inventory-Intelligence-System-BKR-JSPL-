@@ -4,6 +4,9 @@ import useCompanyStore from '../stores/useCompanyStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useApprovalStore } from '../stores/useApprovalStore';
 
+const NETWORK_ERROR_COOLDOWN_MS = 10000;
+let lastNetworkErrorAt = 0;
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
   timeout: 120000, // 120 seconds generous timeout for large batch dispatches and remote database connections
@@ -56,11 +59,15 @@ api.interceptors.response.use(
   },
   (error) => {
     if (!error.response) {
-      useNotificationStore.getState().addNotification({
-        type: 'error',
-        title: 'Network Error',
-        message: 'Unable to connect to the server. Please check your internet connection.'
-      });
+      const now = Date.now();
+      if (now - lastNetworkErrorAt >= NETWORK_ERROR_COOLDOWN_MS) {
+        lastNetworkErrorAt = now;
+        useNotificationStore.getState().addNotification({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to the server. Please check your internet connection.'
+        });
+      }
       return Promise.reject(error);
     }
     

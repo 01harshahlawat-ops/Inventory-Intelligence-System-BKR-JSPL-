@@ -9,8 +9,9 @@ export const useDashboardMetrics = () => {
   return useQuery({
     queryKey: ['dashboard', 'metrics', companyId],
     queryFn: () => dashboardService.getMetrics(),
-    staleTime: 60000,
-    refetchInterval: 120000,
+    staleTime: 180000,
+    refetchInterval: 300000,
+    refetchIntervalInBackground: false,
   });
 };
 
@@ -19,8 +20,9 @@ export const useReturnMetrics = () => {
   return useQuery({
     queryKey: ['dashboard', 'returns', companyId],
     queryFn: () => reportsService.getReturnsMetrics(),
-    staleTime: 60000,
-    refetchInterval: 120000,
+    staleTime: 180000,
+    refetchInterval: 300000,
+    refetchIntervalInBackground: false,
   });
 };
 
@@ -29,8 +31,9 @@ export const useDashboardActivity = () => {
   return useQuery({
     queryKey: ['dashboard', 'activity', companyId],
     queryFn: () => dashboardService.getActivity(),
-    staleTime: 60000,
-    refetchInterval: 120000,
+    staleTime: 180000,
+    refetchInterval: 300000,
+    refetchIntervalInBackground: false,
   });
 };
 
@@ -39,8 +42,9 @@ export const useDashboardAlerts = () => {
   return useQuery({
     queryKey: ['dashboard', 'alerts', companyId],
     queryFn: () => dashboardService.getAlerts(),
-    staleTime: 60000,
-    refetchInterval: 120000,
+    staleTime: 180000,
+    refetchInterval: 300000,
+    refetchIntervalInBackground: false,
   });
 };
 

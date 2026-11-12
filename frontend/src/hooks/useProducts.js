@@ -7,12 +7,12 @@ import api from '../services/api';
 
 const EMPTY_ARRAY = [];
 
-export const useProducts = ({ search = '', category = '', brand = '', status = '', page = 1, limit = 50 } = {}) => {
+export const useProducts = ({ search = '', category = '', brand = '', status = '', page = 1, limit = 50, enabled = true } = {}) => {
   const companyId = useCompanyStore((state) => state.companyId);
   const query = useQuery({
     queryKey: ['products', companyId],
     queryFn: () => productService.getProducts(),
-    enabled: !!companyId,
+    enabled: Boolean(companyId) && enabled,
   });
 
   const products = query.data ?? EMPTY_ARRAY;

@@ -13,8 +13,147 @@ from app.models.schema import (
     SalesReturn, SalesReturnItem
 )
 from app.utils.date_utils import parse_date_param
+from app.services.series_report_service import get_allocation_date_expr
 
 router = APIRouter(prefix="/business-reports", tags=["Business Reports"])
+
+
+def _build_amazon_sales_agg_query(
+    db: Session,
+    company_id: Optional[int],
+    s_clean: Optional[str],
+    matched_wh: Optional[Warehouse],
+    group_by: str,
+    parsed_date_from: Optional[date],
+    parsed_date_to: Optional[date],
+    search: Optional[str],
+):
+    """Build aggregated period query for AmazonLiveAllocation orders shared by view and export endpoints."""
+    is_sqlite = (db.bind.dialect.name == "sqlite") if db.bind else False
+    is_in_series = (s_clean == "IN") or (bool(matched_wh) and (matched_wh.code or "").strip().upper() == "IN")
+    alloc_date_col = get_allocation_date_expr(db, is_in_series)
+
+    if is_sqlite:
+        if group_by == "month":
+            period_col = func.strftime("%Y-%m", alloc_date_col).label("period")
+        elif group_by == "week":
+            period_col = func.strftime("%Y-%W", alloc_date_col).label("period")
+        else:
+            period_col = func.date(alloc_date_col).label("period")
+    else:
+        if group_by == "month":
+            period_col = func.to_char(alloc_date_col, "YYYY-MM").label("period")
+        elif group_by == "week":
+            period_col = func.to_char(alloc_date_col, "YYYY-WW").label("period")
+        else:
+            period_col = func.to_char(alloc_date_col, "YYYY-MM-DD").label("period")
+
+    alloc_query = db.query(AmazonLiveAllocation).filter(
+        or_(
+            AmazonLiveAllocation.allocated_qty > 0,
+            AmazonLiveAllocation.reconciled_qty > 0,
+        ),
+        AmazonLiveAllocation.status.notin_([AllocationStatus.CANCELLED]),
+    )
+    if company_id and not is_in_series:
+        has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
+        if has_allocs:
+            alloc_query = alloc_query.filter(AmazonLiveAllocation.company_id == company_id)
+
+    if s_clean in ("AMAZON", "ALL"):
+        pass
+    elif s_clean == "AFN":
+        alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.AFN)
+    elif s_clean == "MFN":
+        alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN)
+    elif is_in_series:
+        alloc_query = alloc_query.filter(
+            or_(
+                AmazonLiveAllocation.warehouse_id == 38,
+                AmazonLiveAllocation.invoice_number.ilike("IN-%"),
+            )
+        )
+    elif matched_wh:
+        is_central_bkr = (matched_wh.code.upper() == "BKR_CENTRAL") or (
+            company_id == 2
+            and matched_wh.warehouse_type
+            and (
+                str(matched_wh.warehouse_type).upper() == "CENTRAL"
+                or getattr(matched_wh.warehouse_type, "value", "") == "CENTRAL"
+            )
+        )
+        if is_central_bkr:
+            alloc_query = alloc_query.filter(
+                or_(
+                    AmazonLiveAllocation.warehouse_id == matched_wh.id,
+                    AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN,
+                )
+            )
+        else:
+            alloc_query = alloc_query.filter(AmazonLiveAllocation.warehouse_id == matched_wh.id)
+    else:
+        alloc_query = alloc_query.filter(
+            or_(
+                AmazonLiveAllocation.invoice_number.ilike(f"{s_clean}-%"),
+                AmazonLiveAllocation.warehouse_id == -1,
+            )
+        )
+
+    if parsed_date_from:
+        alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(parsed_date_from, datetime.min.time()))
+    if parsed_date_to:
+        alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(parsed_date_to, datetime.max.time()))
+
+    if search and isinstance(search, str) and search.strip():
+        search_pattern = f"%{search.strip()}%"
+        alloc_query = alloc_query.filter(
+            or_(
+                AmazonLiveAllocation.order_id.ilike(search_pattern),
+                AmazonLiveAllocation.sku.ilike(search_pattern),
+                AmazonLiveAllocation.invoice_number.ilike(search_pattern),
+            )
+        )
+
+    fallback_unit_price = case(
+        (Product.item_rate > 0, Product.item_rate * 1.35),
+        else_=500.0,
+    )
+    tax_rate_expr = func.coalesce(Product.default_gst_rate, 18.0)
+    revenue_expr = case(
+        (AmazonLiveAllocation.net_amount.isnot(None), AmazonLiveAllocation.net_amount),
+        else_=fallback_unit_price * AmazonLiveAllocation.allocated_qty,
+    )
+    gross_expr = case(
+        (AmazonLiveAllocation.gross_amount.isnot(None), AmazonLiveAllocation.gross_amount),
+        else_=(fallback_unit_price / (1.0 + tax_rate_expr / 100.0)) * AmazonLiveAllocation.allocated_qty,
+    )
+    tax_expr = case(
+        (AmazonLiveAllocation.tax_amount.isnot(None), AmazonLiveAllocation.tax_amount),
+        else_=revenue_expr - gross_expr,
+    )
+
+    return (
+        alloc_query.outerjoin(
+            Product,
+            and_(
+                Product.sku == AmazonLiveAllocation.sku,
+                or_(
+                    AmazonLiveAllocation.company_id == None,
+                    Product.company_id == AmazonLiveAllocation.company_id,
+                ),
+            ),
+        )
+        .with_entities(
+            period_col,
+            func.count(distinct(AmazonLiveAllocation.order_id)).label("total_orders"),
+            func.sum(AmazonLiveAllocation.allocated_qty).label("total_items_sold"),
+            func.sum(gross_expr).label("total_taxable_amount"),
+            func.sum(tax_expr).label("total_tax"),
+            func.sum(revenue_expr).label("total_revenue"),
+        )
+        .group_by(period_col)
+        .order_by(period_col.desc())
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -59,128 +198,16 @@ def get_sales_report(
             matched_wh = wh_q.first()
 
     if s_clean in ("AFN", "MFN", "AMAZON", "IN") or bool(matched_wh):
-        alloc_date_col = func.coalesce(
-            AmazonLiveAllocation.invoice_date,
-            AmazonLiveAllocation.order_date,
-            AmazonLiveAllocation.updated_at,
-            AmazonLiveAllocation.created_at
+        agg_query = _build_amazon_sales_agg_query(
+            db=db,
+            company_id=company_id,
+            s_clean=s_clean,
+            matched_wh=matched_wh,
+            group_by=group_by,
+            parsed_date_from=parsed_date_from,
+            parsed_date_to=parsed_date_to,
+            search=search,
         )
-        if is_sqlite:
-            if group_by == "month":
-                period_col = func.strftime("%Y-%m", alloc_date_col).label("period")
-            elif group_by == "week":
-                period_col = func.strftime("%Y-%W", alloc_date_col).label("period")
-            else:
-                period_col = func.date(alloc_date_col).label("period")
-        else:
-            if group_by == "month":
-                period_col = func.to_char(alloc_date_col, "YYYY-MM").label("period")
-            elif group_by == "week":
-                period_col = func.to_char(alloc_date_col, "YYYY-WW").label("period")
-            else:
-                period_col = func.to_char(alloc_date_col, "YYYY-MM-DD").label("period")
-
-        alloc_query = db.query(AmazonLiveAllocation).filter(
-            or_(
-                AmazonLiveAllocation.allocated_qty > 0,
-                AmazonLiveAllocation.reconciled_qty > 0,
-                AmazonLiveAllocation.status.in_([AllocationStatus.SHIPPED, AllocationStatus.UNSHIPPED, AllocationStatus.PENDING, AllocationStatus.RETURNED])
-            ),
-            AmazonLiveAllocation.status.notin_([AllocationStatus.CANCELLED])
-        )
-        if company_id and s_clean not in ("IN",):
-            has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
-            if has_allocs:
-                alloc_query = alloc_query.filter(AmazonLiveAllocation.company_id == company_id)
-
-        if s_clean in ("AMAZON", "ALL"):
-            pass  # Include both AFN and MFN
-        elif s_clean == "AFN":
-            alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.AFN)
-        elif s_clean == "MFN":
-            alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN)
-        elif s_clean == "IN" or (matched_wh and matched_wh.code.upper() == "IN"):
-            alloc_query = alloc_query.filter(
-                or_(
-                    AmazonLiveAllocation.warehouse_id == 38,
-                    AmazonLiveAllocation.invoice_number.ilike("IN-%")
-                )
-            )
-        elif matched_wh:
-            is_central_bkr = (matched_wh.code.upper() == "BKR_CENTRAL") or (
-                company_id == 2 and matched_wh.warehouse_type and (str(matched_wh.warehouse_type).upper() == "CENTRAL" or getattr(matched_wh.warehouse_type, "value", "") == "CENTRAL")
-            )
-            if is_central_bkr:
-                alloc_query = alloc_query.filter(
-                    or_(
-                        AmazonLiveAllocation.warehouse_id == matched_wh.id,
-                        AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN
-                    )
-                )
-            else:
-                alloc_query = alloc_query.filter(AmazonLiveAllocation.warehouse_id == matched_wh.id)
-        else:
-            alloc_query = alloc_query.filter(
-                or_(
-                    AmazonLiveAllocation.invoice_number.ilike(f"{s_clean}-%"),
-                    AmazonLiveAllocation.warehouse_id == -1
-                )
-            )
-
-        if parsed_date_from:
-            alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(parsed_date_from, datetime.min.time()))
-        if parsed_date_to:
-            alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(parsed_date_to, datetime.max.time()))
-
-        if search:
-            s_val = search if isinstance(search, str) else ""
-            if s_val.strip():
-                search_pattern = f"%{s_val.strip()}%"
-                alloc_query = alloc_query.filter(
-                    or_(
-                        AmazonLiveAllocation.order_id.ilike(search_pattern),
-                        AmazonLiveAllocation.sku.ilike(search_pattern),
-                        AmazonLiveAllocation.invoice_number.ilike(search_pattern)
-                    )
-                )
-
-        # Revenue and GST calculation matching accountant standard
-        selling_price_expr = case(
-            (AmazonLiveAllocation.net_amount > 0, AmazonLiveAllocation.net_amount),
-            (Product.item_rate > 0, Product.item_rate * 1.35),
-            else_=500.0
-        )
-        tax_rate_expr = func.coalesce(Product.default_gst_rate, 18.0)
-        gross_expr = case(
-            (AmazonLiveAllocation.gross_amount > 0, AmazonLiveAllocation.gross_amount),
-            else_=(selling_price_expr / (1.0 + tax_rate_expr / 100.0)) * AmazonLiveAllocation.allocated_qty
-        )
-        revenue_expr = selling_price_expr * case(
-            (AmazonLiveAllocation.net_amount > 0, 1),
-            else_=AmazonLiveAllocation.allocated_qty
-        )
-        tax_expr = case(
-            (AmazonLiveAllocation.tax_amount > 0, AmazonLiveAllocation.tax_amount),
-            else_=revenue_expr - gross_expr
-        )
-
-        agg_query = alloc_query.outerjoin(
-            Product,
-            and_(
-                Product.sku == AmazonLiveAllocation.sku,
-                or_(
-                    AmazonLiveAllocation.company_id == None,
-                    Product.company_id == AmazonLiveAllocation.company_id
-                )
-            )
-        ).with_entities(
-            period_col,
-            func.count(distinct(AmazonLiveAllocation.order_id)).label("total_orders"),
-            func.sum(AmazonLiveAllocation.allocated_qty).label("total_items_sold"),
-            func.sum(gross_expr).label("total_taxable_amount"),
-            func.sum(tax_expr).label("total_tax"),
-            func.sum(revenue_expr).label("total_revenue")
-        ).group_by(period_col).order_by(period_col.desc())
 
         total_count = agg_query.count()
         skip = (page - 1) * limit
@@ -931,129 +958,16 @@ def export_sales(
             matched_wh = wh_q.first()
 
     if s_clean in ("AFN", "MFN", "AMAZON", "IN") or bool(matched_wh):
-        alloc_date_col = func.coalesce(
-            AmazonLiveAllocation.invoice_date,
-            AmazonLiveAllocation.order_date,
-            AmazonLiveAllocation.updated_at,
-            AmazonLiveAllocation.created_at
-        )
-        if is_sqlite:
-            if group_by == "month":
-                period_col = func.strftime("%Y-%m", alloc_date_col).label("period")
-            elif group_by == "week":
-                period_col = func.strftime("%Y-%W", alloc_date_col).label("period")
-            else:
-                period_col = func.date(alloc_date_col).label("period")
-        else:
-            if group_by == "month":
-                period_col = func.to_char(alloc_date_col, "YYYY-MM").label("period")
-            elif group_by == "week":
-                period_col = func.to_char(alloc_date_col, "YYYY-WW").label("period")
-            else:
-                period_col = func.to_char(alloc_date_col, "YYYY-MM-DD").label("period")
-
-        alloc_query = db.query(AmazonLiveAllocation).filter(
-            or_(
-                AmazonLiveAllocation.allocated_qty > 0,
-                AmazonLiveAllocation.reconciled_qty > 0,
-                AmazonLiveAllocation.status.in_([AllocationStatus.SHIPPED, AllocationStatus.UNSHIPPED, AllocationStatus.PENDING, AllocationStatus.RETURNED])
-            ),
-            AmazonLiveAllocation.status.notin_([AllocationStatus.CANCELLED])
-        )
-        if company_id and s_clean not in ("IN",):
-            has_allocs = db.query(AmazonLiveAllocation.id).filter(AmazonLiveAllocation.company_id == company_id).first()
-            if has_allocs:
-                alloc_query = alloc_query.filter(AmazonLiveAllocation.company_id == company_id)
-
-        if s_clean in ("AMAZON", "ALL"):
-            pass  # Include both AFN and MFN
-        elif s_clean == "AFN":
-            alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.AFN)
-        elif s_clean == "MFN":
-            alloc_query = alloc_query.filter(AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN)
-        elif s_clean == "IN" or (matched_wh and matched_wh.code.upper() == "IN"):
-            alloc_query = alloc_query.filter(
-                or_(
-                    AmazonLiveAllocation.warehouse_id == 38,
-                    AmazonLiveAllocation.invoice_number.ilike("IN-%")
-                )
-            )
-        elif matched_wh:
-            is_central_bkr = (matched_wh.code.upper() == "BKR_CENTRAL") or (
-                company_id == 2 and matched_wh.warehouse_type and (str(matched_wh.warehouse_type).upper() == "CENTRAL" or getattr(matched_wh.warehouse_type, "value", "") == "CENTRAL")
-            )
-            if is_central_bkr:
-                alloc_query = alloc_query.filter(
-                    or_(
-                        AmazonLiveAllocation.warehouse_id == matched_wh.id,
-                        AmazonLiveAllocation.amazon_network_at_allocation == AmazonNetworkType.MFN
-                    )
-                )
-            else:
-                alloc_query = alloc_query.filter(AmazonLiveAllocation.warehouse_id == matched_wh.id)
-        else:
-            alloc_query = alloc_query.filter(
-                or_(
-                    AmazonLiveAllocation.invoice_number.ilike(f"{s_clean}-%"),
-                    AmazonLiveAllocation.warehouse_id == -1
-                )
-            )
-
-        if parsed_date_from:
-            alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(parsed_date_from, datetime.min.time()))
-        if parsed_date_to:
-            alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(parsed_date_to, datetime.max.time()))
-
-        if search:
-            s_val = search if isinstance(search, str) else ""
-            if s_val.strip():
-                search_pattern = f"%{s_val.strip()}%"
-                alloc_query = alloc_query.filter(
-                    or_(
-                        AmazonLiveAllocation.order_id.ilike(search_pattern),
-                        AmazonLiveAllocation.sku.ilike(search_pattern),
-                        AmazonLiveAllocation.invoice_number.ilike(search_pattern)
-                    )
-                )
-
-        selling_price_expr = case(
-            (AmazonLiveAllocation.net_amount > 0, AmazonLiveAllocation.net_amount),
-            (Product.item_rate > 0, Product.item_rate * 1.35),
-            else_=500.0
-        )
-        tax_rate_expr = func.coalesce(Product.default_gst_rate, 18.0)
-        gross_expr = case(
-            (AmazonLiveAllocation.gross_amount > 0, AmazonLiveAllocation.gross_amount),
-            else_=(selling_price_expr / (1.0 + tax_rate_expr / 100.0)) * AmazonLiveAllocation.allocated_qty
-        )
-        revenue_expr = selling_price_expr * case(
-            (AmazonLiveAllocation.net_amount > 0, 1),
-            else_=AmazonLiveAllocation.allocated_qty
-        )
-        tax_expr = case(
-            (AmazonLiveAllocation.tax_amount > 0, AmazonLiveAllocation.tax_amount),
-            else_=revenue_expr - gross_expr
-        )
-
-        agg_query = alloc_query.outerjoin(
-            Product,
-            and_(
-                Product.sku == AmazonLiveAllocation.sku,
-                or_(
-                    AmazonLiveAllocation.company_id == None,
-                    Product.company_id == AmazonLiveAllocation.company_id
-                )
-            )
-        ).with_entities(
-            period_col,
-            func.count(distinct(AmazonLiveAllocation.order_id)).label("total_orders"),
-            func.sum(AmazonLiveAllocation.allocated_qty).label("total_items_sold"),
-            func.sum(gross_expr).label("total_taxable_amount"),
-            func.sum(tax_expr).label("total_tax"),
-            func.sum(revenue_expr).label("total_revenue")
-        ).group_by(period_col).order_by(period_col.desc())
-
-        results = agg_query.all()
+        results = _build_amazon_sales_agg_query(
+            db=db,
+            company_id=company_id,
+            s_clean=s_clean,
+            matched_wh=matched_wh,
+            group_by=group_by,
+            parsed_date_from=parsed_date_from,
+            parsed_date_to=parsed_date_to,
+            search=search,
+        ).all()
     else:
         if is_sqlite:
             if group_by == "month":

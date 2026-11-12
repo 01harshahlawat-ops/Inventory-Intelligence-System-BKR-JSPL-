@@ -1,10 +1,11 @@
 import os
 import io
 import csv
+import re
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any, Tuple, Union
 from sqlalchemy.orm import Session, selectinload, joinedload
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, case
 
 from app.models.schema import (
     Sale, SaleItem, Product, Warehouse, Company, Inventory,
@@ -250,6 +251,188 @@ def get_account_code_map() -> Dict[str, str]:
             pass
     _ACCOUNT_CODE_CACHE = mapping
     return mapping
+
+_CANONICAL_STATE_LEDGER: Dict[str, Tuple[str, str, str]] = {
+    "01": ("Jammu and Kashmir", "01", "AMAZON SELLER PORTAL CUSTOMER (JK)"),
+    "02": ("Himachal Pradesh", "02", "AMAZON SELLER PORTAL CUSTOMER (HP)"),
+    "03": ("Punjab", "03", "AMAZON SELLER PORTAL CUSTOMER (PB)"),
+    "04": ("Chandigarh", "04", "AMAZON SELLER PORTAL CUSTOMER (CHD)"),
+    "05": ("Uttarakhand", "05", "AMAZON SELLER PORTAL CUSTOMER (UT)"),
+    "06": ("Haryana", "06", "AMAZON SELLER PORTAL CUSTOMER (HRY)"),
+    "07": ("Delhi", "07", "AMAZON SELLER PORTAL CUSTOMER (DL)"),
+    "08": ("Rajasthan", "08", "AMAZON SELLER PORTAL CUSTOMER (RJ)"),
+    "09": ("Uttar Pradesh", "09", "AMAZON SELLER PORTAL CUSTOMER (UP)"),
+    "10": ("Bihar", "10", "AMAZON SELLER PORTAL CUSTOMER (BH)"),
+    "11": ("Sikkim", "11", "AMAZON SELLER PORTAL CUSTOMER (SK)"),
+    "12": ("Arunachal Pradesh", "12", "AMAZON SELLER PORTAL CUSTOMER (AR)"),
+    "13": ("Nagaland", "13", "AMAZON SELLER PORTAL CUSTOMER (NL)"),
+    "14": ("Manipur", "14", "AMAZON SELLER PORTAL CUSTOMER (MN)"),
+    "15": ("Mizoram", "15", "AMAZON SELLER PORTAL CUSTOMER (MI)"),
+    "16": ("Tripura", "16", "AMAZON SELLER PORTAL CUSTOMER (TR)"),
+    "17": ("Meghalaya", "17", "AMAZON SELLER PORTAL CUSTOMER (ME)"),
+    "18": ("Assam", "18", "AMAZON SELLER PORTAL CUSTOMER (AS)"),
+    "19": ("West Bengal", "19", "AMAZON SELLER PORTAL CUSTOMER (WB)"),
+    "20": ("Jharkhand", "20", "AMAZON SELLER PORTAL CUSTOMER (JH)"),
+    "21": ("Odisha", "21", "AMAZON SELLER PORTAL CUSTOMER (OR)"),
+    "22": ("Chhattisgarh", "22", "AMAZON SELLER PORTAL CUSTOMER (CG)"),
+    "23": ("Madhya Pradesh", "23", "AMAZON SELLER PORTAL CUSTOMER (MP)"),
+    "24": ("Gujarat", "24", "AMAZON SELLER PORTAL CUSTOMER (GJ)"),
+    "25": ("Daman and Diu", "25", "AMAZON SELLER PORTAL CUSTOMER (DD)"),
+    "26": ("Dadra and Nagar Haveli", "26", "AMAZON SELLER PORTAL CUSTOMER (DN)"),
+    "27": ("Maharashtra", "27", "AMAZON SELLER PORTAL CUSTOMER (MH)"),
+    "29": ("Karnataka", "29", "AMAZON SELLER PORTAL CUSTOMER (KA)"),
+    "30": ("Goa", "30", "AMAZON SELLER PORTAL CUSTOMER (GA)"),
+    "31": ("Lakshadweep", "31", "AMAZON SELLER PORTAL CUSTOMER (LD)"),
+    "32": ("Kerala", "32", "AMAZON SELLER PORTAL CUSTOMER (KL)"),
+    "33": ("Tamil Nadu", "33", "AMAZON SELLER PORTAL CUSTOMER (TN)"),
+    "34": ("Puducherry", "34", "AMAZON SELLER PORTAL CUSTOMER (PY)"),
+    "35": ("Andaman and Nicobar Islands", "35", "AMAZON SELLER PORTAL CUSTOMER (AN)"),
+    "36": ("Telangana", "36", "AMAZON SELLER PORTAL CUSTOMER (TS)"),
+    "37": ("Andhra Pradesh", "37", "AMAZON SELLER PORTAL CUSTOMER (AD)"),
+    "38": ("Ladakh", "38", "AMAZON SELLER PORTAL CUSTOMER (LA)"),
+}
+
+_STATE_ALIAS_TO_CODE: Dict[str, str] = {
+    "JK": "01", "JAMMU AND KASHMIR": "01", "JAMMU & KASHMIR": "01", "JAMMU KASHMIR": "01",
+    "HP": "02", "HIMACHAL PRADESH": "02",
+    "PB": "03", "PUNJAB": "03",
+    "CH": "04", "CHD": "04", "CHANDIGARH": "04",
+    "UT": "05", "UK": "05", "UTTARAKHAND": "05", "UTTARANCHAL": "05",
+    "HR": "06", "HRY": "06", "HARYANA": "06",
+    "DL": "07", "DELHI": "07", "NEW DELHI": "07", "NCT OF DELHI": "07",
+    "RJ": "08", "RAJASTHAN": "08",
+    "UP": "09", "UTTAR PRADESH": "09",
+    "BR": "10", "BH": "10", "BIHAR": "10",
+    "SK": "11", "SIKKIM": "11",
+    "AR": "12", "ARUNACHAL PRADESH": "12",
+    "NL": "13", "NAGALAND": "13",
+    "MN": "14", "MANIPUR": "14",
+    "MZ": "15", "MI": "15", "MIZORAM": "15",
+    "TR": "16", "TRIPURA": "16",
+    "ML": "17", "ME": "17", "MEGHALAYA": "17",
+    "AS": "18", "ASSAM": "18",
+    "WB": "19", "WEST BENGAL": "19", "WEST BENGAL ": "19",
+    "JH": "20", "JHARKHAND": "20",
+    "OR": "21", "OD": "21", "ODISHA": "21", "ORISSA": "21",
+    "CG": "22", "CT": "22", "CHHATTISGARH": "22", "CHHATISGARH": "22",
+    "MP": "23", "MADHYA PRADESH": "23",
+    "GJ": "24", "GUJARAT": "24", "GUJARATH": "24",
+    "DD": "25", "DAMAN AND DIU": "25", "DAMAN & DIU": "25",
+    "DN": "26", "DADRA AND NAGAR HAVELI": "26", "DADRA & NAGAR HAVELI": "26",
+    "DADRA AND NAGAR HAVELI AND DAMAN AND DIU": "26", "DNHDD": "26",
+    "MH": "27", "MAHARASHTRA": "27", "MAHARASTRA": "27",
+    "KA": "29", "KARNATAKA": "29",
+    "GA": "30", "GOA": "30",
+    "LD": "31", "LAKSHADWEEP": "31",
+    "KL": "32", "KERALA": "32",
+    "TN": "33", "TAMIL NADU": "33", "TAMILNADU": "33",
+    "PY": "34", "PUDUCHERRY": "34", "PONDICHERRY": "34",
+    "AN": "35", "ANDAMAN AND NICOBAR ISLANDS": "35", "ANDAMAN AND NICOBAR ISLAND": "35",
+    "ANDAMAN & NICOBAR ISLANDS": "35", "ANDAMAN AND NICOBAR": "35",
+    "TS": "36", "TG": "36", "TELANGANA": "36",
+    "AD": "37", "AP": "37", "ANDHRA PRADESH": "37", "ANDHRA PRADESH (NEW)": "37",
+    "LA": "38", "LADAKH": "38",
+}
+
+
+def resolve_state_info(
+    raw_state: Optional[str],
+    gstin: Optional[str] = None,
+    fallback_state: str = "Chandigarh",
+) -> Tuple[str, str, str]:
+    """Return (official_state_name, gst_state_code, b2c_ledger_name) for any Indian state or GSTIN."""
+    if gstin and len(gstin.strip()) >= 2:
+        gst_code = gstin.strip()[:2]
+        if gst_code in _CANONICAL_STATE_LEDGER:
+            return _CANONICAL_STATE_LEDGER[gst_code]
+
+    for candidate in (raw_state, fallback_state):
+        if not candidate:
+            continue
+        norm = " ".join(str(candidate).replace("\xa0", " ").replace("&", " AND ").strip().upper().split())
+        if norm in _CANONICAL_STATE_LEDGER:
+            return _CANONICAL_STATE_LEDGER[norm]
+        code = _STATE_ALIAS_TO_CODE.get(norm)
+        if not code and "(" in norm:
+            code = _STATE_ALIAS_TO_CODE.get(norm.split("(")[0].strip())
+        if code and code in _CANONICAL_STATE_LEDGER:
+            return _CANONICAL_STATE_LEDGER[code]
+
+    fb_clean = (raw_state or fallback_state or "Chandigarh").strip().title()
+    return fb_clean, "04", f"AMAZON SELLER PORTAL CUSTOMER ({fb_clean[:3].upper()})"
+
+
+def resolve_product_and_base(
+    alloc_sku: Optional[str],
+    company_id: Optional[int],
+    prod_map_by_company: Dict[Tuple[Optional[int], str], Any],
+    prod_map_sku: Dict[str, Any],
+) -> Tuple[Optional[Any], Optional[Any]]:
+    """Resolve exact SKU product and optional base-SKU metadata without merging distinct variants."""
+    norm_sku = (alloc_sku or "").strip().upper()
+    if not norm_sku:
+        return None, None
+    exact_prod = prod_map_by_company.get((company_id, norm_sku)) or prod_map_sku.get(norm_sku)
+    base_sku = re.split(r"[-\s]+", norm_sku)[0] if norm_sku else norm_sku
+    base_prod = None
+    if base_sku and base_sku != norm_sku:
+        base_prod = prod_map_by_company.get((company_id, base_sku)) or prod_map_sku.get(base_sku)
+    return exact_prod, base_prod
+
+
+def derive_gst_rate(
+    gross_amt: Optional[float],
+    raw_tax: Optional[float],
+    fallback_rate: float = 18.0,
+) -> float:
+    """Derive actual GST slab from transaction gross & tax amounts, preserving 0% tax-free items."""
+    if raw_tax is not None:
+        if abs(raw_tax) <= 0.005:
+            return 0.0
+        if gross_amt and abs(gross_amt) > 0:
+            pct = (abs(raw_tax) / abs(gross_amt)) * 100.0
+            for slab in (5.0, 12.0, 18.0, 28.0):
+                if abs(pct - slab) <= 0.35:
+                    return slab
+            return round(pct, 2)
+    return float(fallback_rate if fallback_rate is not None else 18.0)
+
+
+def get_allocation_date_expr(db: Session, is_in_series: bool):
+    """
+    Return the effective date column expression for Amazon allocations.
+    For IN series (MFN), orders follow invoice_date unless a cross-month dispatch was delayed >= 6 days
+    into the following month (e.g., Sept invoice dispatched in Oct). Other warehouses keep shipment_date.
+    """
+    if not is_in_series:
+        return func.coalesce(
+            AmazonLiveAllocation.shipment_date,
+            AmazonLiveAllocation.invoice_date,
+            AmazonLiveAllocation.order_date,
+        )
+
+    is_sqlite = bool(db.bind and db.bind.dialect.name == "sqlite")
+    if is_sqlite:
+        diff_month = func.strftime("%Y-%m", AmazonLiveAllocation.shipment_date) != func.strftime("%Y-%m", AmazonLiveAllocation.invoice_date)
+        lag_expr = func.julianday(AmazonLiveAllocation.shipment_date) - func.julianday(AmazonLiveAllocation.invoice_date)
+    else:
+        diff_month = func.to_char(AmazonLiveAllocation.shipment_date, "YYYY-MM") != func.to_char(AmazonLiveAllocation.invoice_date, "YYYY-MM")
+        lag_expr = func.extract("epoch", AmazonLiveAllocation.shipment_date - AmazonLiveAllocation.invoice_date) / 86400.0
+
+    delayed_cross_month = and_(
+        AmazonLiveAllocation.invoice_date.isnot(None),
+        AmazonLiveAllocation.shipment_date.isnot(None),
+        diff_month,
+        lag_expr >= 6.0,
+    )
+    return case(
+        (delayed_cross_month, AmazonLiveAllocation.shipment_date),
+        else_=func.coalesce(
+            AmazonLiveAllocation.invoice_date,
+            AmazonLiveAllocation.shipment_date,
+            AmazonLiveAllocation.order_date,
+        ),
+    )
 
 class SeriesReportService:
     @staticmethod
@@ -698,14 +881,11 @@ class SeriesReportService:
         else:
             matched_wh = matched_warehouse_query.first()
 
+        is_in_series = series_clean == "IN" or (bool(matched_wh) and (matched_wh.code or "").strip().upper() == "IN")
         is_amazon_target = series_clean in ("AMAZON", "AFN", "MFN", "IN") or bool(matched_wh)
         amazon_allocations = []
         if is_amazon_target:
-            alloc_date_col = func.coalesce(
-                AmazonLiveAllocation.shipment_date,
-                AmazonLiveAllocation.invoice_date,
-                AmazonLiveAllocation.order_date
-            )
+            alloc_date_col = get_allocation_date_expr(db, is_in_series)
             alloc_query = db.query(AmazonLiveAllocation).filter(
                 AmazonLiveAllocation.status == AllocationStatus.SHIPPED,
                 or_(
@@ -763,8 +943,17 @@ class SeriesReportService:
                 alloc_query = alloc_query.filter(alloc_date_col >= datetime.combine(date_from, datetime.min.time()))
             if date_to:
                 alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(date_to, datetime.max.time()))
+            sort_date_col = (
+                func.coalesce(
+                    AmazonLiveAllocation.invoice_date,
+                    AmazonLiveAllocation.shipment_date,
+                    AmazonLiveAllocation.order_date,
+                )
+                if is_in_series
+                else alloc_date_col
+            )
             amazon_allocations = alloc_query.order_by(
-                alloc_date_col.asc(),
+                sort_date_col.asc(),
                 AmazonLiveAllocation.invoice_number.asc(),
                 AmazonLiveAllocation.id.asc()
             ).all()
@@ -1010,68 +1199,56 @@ class SeriesReportService:
 
             # Group allocations by bill number so multiple line items under the same invoice
             # are presented together followed by a single BILL NO. WISE TOTALS row.
-            alloc_groups = []
-            curr_bill = None
-            curr_items = []
-
+            bill_groups_map: Dict[str, List[Tuple[str, Any]]] = {}
             for alloc in amazon_allocations:
                 wh = wh_map.get(alloc.warehouse_id) if alloc.warehouse_id else None
                 b_no = alloc.invoice_number or (f"IN-{alloc.id}" if (alloc.amazon_network_at_allocation and alloc.amazon_network_at_allocation.value == "MFN") or (wh and wh.code == "IN") else f"{wh.code if wh else 'AMZ'}-{alloc.id}")
-                if curr_bill is None or b_no == curr_bill:
-                    curr_items.append((b_no, alloc))
-                    curr_bill = b_no
-                else:
-                    alloc_groups.append(curr_items)
-                    curr_items = [(b_no, alloc)]
-                    curr_bill = b_no
-            if curr_items:
-                alloc_groups.append(curr_items)
+                bill_groups_map.setdefault(b_no, []).append((b_no, alloc))
+            alloc_groups = list(bill_groups_map.values())
 
             for group in alloc_groups:
                 b_qty = 0
                 b_gross = 0.0
+                b_sgst = 0.0
+                b_cgst = 0.0
                 b_igst = 0.0
                 b_net = 0.0
                 b_cost = 0.0
 
                 for bill_no, alloc in group:
                     sno += 1
-                    alloc_sku = (alloc.sku or "").upper()
-                    alloc_sku_base = alloc_sku.split("-")[0]
-                    prod = (
-                        prod_map_by_company.get((alloc.company_id, alloc_sku)) or
-                        prod_map_sku.get(alloc_sku) or
-                        prod_map_by_company.get((alloc.company_id, alloc_sku_base)) or
-                        prod_map_sku.get(alloc_sku_base)
+                    alloc_sku = (alloc.sku or "").strip().upper()
+                    prod, base_prod = resolve_product_and_base(
+                        alloc.sku, alloc.company_id, prod_map_by_company, prod_map_sku
                     )
                     wh = wh_map.get(alloc.warehouse_id) if alloc.warehouse_id else None
                     hub = hub_map.get(wh.hub_id) if (wh and wh.hub_id) else None
-                    
-                    # Resolve GST State accurately from StateHub or warehouse metadata
+
+                    # Resolve seller origin state accurately from StateHub or warehouse metadata
                     if hub and hub.state:
-                        state_name = hub.state.strip().title()
+                        origin_state = hub.state.strip().title()
                     elif wh and ((wh.code or "").upper() in ("VSHB", "IN", "BKR_CENTRAL", "AUTO_GODOWN") or (wh.warehouse_type and "CENTRAL" in str(wh.warehouse_type).upper())):
-                        state_name = "Chandigarh"
+                        origin_state = "Chandigarh"
                     elif alloc.amazon_network_at_allocation and getattr(alloc.amazon_network_at_allocation, "value", str(alloc.amazon_network_at_allocation)).upper() == "MFN":
-                        state_name = "Chandigarh"
+                        origin_state = "Chandigarh"
                     elif wh and ("KARNATAKA" in (wh.name or "").upper() or any((wh.code or "").upper().startswith(p) for p in ("BLR", "KWZ"))):
-                        state_name = "Karnataka"
+                        origin_state = "Karnataka"
                     elif wh and ("MAHARASTRA" in (wh.name or "").upper() or "MAHARASHTRA" in (wh.name or "").upper() or any((wh.code or "").upper().startswith(p) for p in ("BOM", "PNQ", "ISK"))):
-                        state_name = "Maharashtra"
+                        origin_state = "Maharashtra"
                     elif wh and ("WEST_BANGA" in (wh.name or "").upper() or "WEST BENGAL" in (wh.name or "").upper() or any((wh.code or "").upper().startswith(p) for p in ("CCX", "CCU"))):
-                        state_name = "West Bengal"
+                        origin_state = "West Bengal"
                     elif wh and ("TAMIL_NADU" in (wh.name or "").upper() or "TAMIL NADU" in (wh.name or "").upper() or any((wh.code or "").upper().startswith(p) for p in ("CJB", "MAA"))):
-                        state_name = "Tamil Nadu"
+                        origin_state = "Tamil Nadu"
                     elif wh and ("TELANGANA" in (wh.name or "").upper() or (wh.code or "").upper().startswith("HYD")):
-                        state_name = "Telangana"
+                        origin_state = "Telangana"
                     elif wh and ("MADHYA_PRA" in (wh.name or "").upper() or "MADHYA PRADESH" in (wh.name or "").upper() or any((wh.code or "").upper().startswith(p) for p in ("SIDA", "IDX"))):
-                        state_name = "Madhya Pradesh"
+                        origin_state = "Madhya Pradesh"
                     elif wh and ("UTTARPRADE" in (wh.name or "").upper() or "UTTAR PRADESH" in (wh.name or "").upper() or (wh.code or "").upper().startswith("LKO")):
-                        state_name = "Uttar Pradesh"
+                        origin_state = "Uttar Pradesh"
                     elif wh and ("GUJARATH" in (wh.name or "").upper() or "GUJARAT" in (wh.name or "").upper() or (wh.code or "").upper().startswith("AMD")):
-                        state_name = "Gujarat"
+                        origin_state = "Gujarat"
                     else:
-                        state_name = "Chandigarh" if (company_id in (2, 3) or series_clean in ("VSHB", "IN", "MFN")) else "Karnataka"
+                        origin_state = "Chandigarh" if (company_id in (2, 3) or series_clean in ("VSHB", "IN", "MFN")) else "Karnataka"
 
                     is_central = (
                         (wh and (wh.code or "").upper() in ("VSHB", "IN", "BKR_CENTRAL", "AUTO_GODOWN")) or
@@ -1081,68 +1258,129 @@ class SeriesReportService:
                     )
 
                     godown_name = wh.name if wh else (alloc.amazon_network_at_allocation.value if alloc.amazon_network_at_allocation else "Amazon AFN")
-                    hsn_desc = prod.category if prod and prod.category else "Other"
 
-                    # Structure addresses accurately
+                    # Structure origin addresses accurately
                     if is_central:
                         addr_1 = hub.address if (hub and hub.address) else "Plot no: 150, Industrial & Business Park-2"
                         addr_2 = hub.city if (hub and hub.city) else "Chandigarh"
-                        addr_3 = f"{state_name} - 160002"
+                        addr_3 = f"{origin_state} - 160002"
                     elif hub and hub.address:
                         addr_parts = [p.strip() for p in hub.address.split(",") if p.strip()]
                         addr_1 = addr_parts[0] if len(addr_parts) > 0 else f"Amazon FC {godown_name}"
                         addr_2 = addr_parts[1] if len(addr_parts) > 1 else (hub.city or "")
-                        addr_3 = addr_parts[2] if len(addr_parts) > 2 else state_name
+                        addr_3 = addr_parts[2] if len(addr_parts) > 2 else origin_state
                     else:
                         addr_1 = f"Amazon FC {godown_name}"
                         addr_2 = hub.city if (hub and hub.city) else ""
-                        addr_3 = state_name
+                        addr_3 = origin_state
 
                     order_id = alloc.order_id
                     item_code = alloc.sku
-                    item_name = prod.name if prod else alloc.sku
-                    hsn_code = alloc.hsn_code or (prod.hsn if prod else "") or ""
-                    pack_size = prod.unit if prod else ""
+                    prod_name_clean = (prod.name or "").strip() if prod else ""
+                    if prod_name_clean and prod_name_clean.upper() != alloc_sku:
+                        item_name = prod_name_clean
+                    elif base_prod and base_prod.name:
+                        item_name = base_prod.name
+                    else:
+                        item_name = prod_name_clean or alloc.sku
+
+                    hsn_code = (
+                        alloc.hsn_code
+                        or (prod.hsn if prod and prod.hsn else "")
+                        or (base_prod.hsn if base_prod and base_prod.hsn else "")
+                        or ""
+                    )
+                    hsn_desc = (
+                        (prod.category if prod and prod.category else None)
+                        or (base_prod.category if base_prod and base_prod.category else None)
+                        or "Other"
+                    )
+                    pack_size = (
+                        (prod.unit if prod and prod.unit else None)
+                        or (base_prod.unit if base_prod and base_prod.unit else None)
+                        or ""
+                    )
                     qty = alloc.allocated_qty or alloc.reconciled_qty or 1
-                    
-                    gst_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
-                    group_tax = f"GST {int(gst_rate) if gst_rate.is_integer() else gst_rate}%"
-                    
-                    pur_rate = float(prod.item_rate if prod and prod.item_rate else 0.0)
+
+                    fallback_rate = (
+                        float(prod.default_gst_rate)
+                        if (prod and prod.default_gst_rate is not None)
+                        else (float(base_prod.default_gst_rate) if (base_prod and base_prod.default_gst_rate is not None) else 18.0)
+                    )
+
+                    pur_rate = (
+                        float(prod.item_rate)
+                        if (prod and prod.item_rate and float(prod.item_rate) > 0)
+                        else (float(base_prod.item_rate) if (base_prod and base_prod.item_rate and float(base_prod.item_rate) > 0) else 0.0)
+                    )
                     pur_rate_str = f"{round(pur_rate, 2):g}" if pur_rate > 0 else ""
                     rate_1_str = f"{pur_rate:.4f}" if pur_rate > 0 else ""
 
+                    cust_gstin = (alloc.customer_gstin or "").strip()
+                    dest_state, _, default_b2c_party = resolve_state_info(
+                        alloc.state_name, cust_gstin, fallback_state=origin_state
+                    )
+                    is_intra = bool(alloc.state_name and dest_state.upper() == origin_state.upper())
+
                     if alloc.gross_amount is not None and alloc.net_amount is not None:
-                        gross_amt = float(alloc.gross_amount)
-                        net_amt = float(alloc.net_amount)
-                        igst = float(alloc.tax_amount or round(net_amt - gross_amt, 2))
+                        gross_amt = round(float(alloc.gross_amount), 2)
+                        net_amt = round(float(alloc.net_amount), 2)
+                        total_tax = round(float(alloc.tax_amount), 2) if alloc.tax_amount is not None else round(net_amt - gross_amt, 2)
+                        gst_rate = derive_gst_rate(gross_amt, total_tax, fallback_rate)
                         rate_unit = round(gross_amt / qty, 2)
-                        tax_3 = int(gst_rate) if gst_rate.is_integer() else gst_rate
                     else:
+                        gst_rate = fallback_rate
                         selling_price = pur_rate * 1.35 if pur_rate > 0 else 500.0
                         rate_unit = round(selling_price / (1 + (gst_rate / 100.0)), 2)
                         gross_amt = round(rate_unit * qty, 2)
-                        igst = round(gross_amt * (gst_rate / 100.0), 2)
-                        tax_3 = int(gst_rate) if gst_rate.is_integer() else gst_rate
-                        net_amt = round(gross_amt + igst, 2)
+                        total_tax = round(gross_amt * (gst_rate / 100.0), 2)
+                        net_amt = round(gross_amt + total_tax, 2)
+
+                    if abs(gst_rate) <= 0.005:
+                        group_tax = "GST TAXFREE"
+                    else:
+                        group_tax = f"GST {int(gst_rate) if float(gst_rate).is_integer() else gst_rate}%"
+
+                    if abs(total_tax) <= 0.005:
+                        sgst = 0.0
+                        cgst = 0.0
+                        igst = 0.0
+                        tax_3 = 0
+                        tax_region = "CGST/SGST" if is_intra else "IGST"
+                    elif is_intra:
+                        sgst = round(total_tax / 2.0, 2)
+                        cgst = round(total_tax - sgst, 2)
+                        igst = 0.0
+                        half_rate = gst_rate / 2.0
+                        tax_3 = int(half_rate) if float(half_rate).is_integer() else round(half_rate, 2)
+                        tax_region = "CGST/SGST"
+                    else:
+                        sgst = 0.0
+                        cgst = 0.0
+                        igst = round(total_tax, 2)
+                        tax_3 = int(gst_rate) if float(gst_rate).is_integer() else round(gst_rate, 2)
+                        tax_region = "IGST"
 
                     cost_amt = round(pur_rate * qty, 2) if pur_rate > 0 else ""
 
-                    actual_dt = alloc.shipment_date or alloc.invoice_date or alloc.order_date or alloc.updated_at or alloc.created_at
+                    if is_in_series:
+                        actual_dt = alloc.invoice_date or alloc.shipment_date or alloc.order_date or alloc.updated_at or alloc.created_at
+                    else:
+                        actual_dt = alloc.shipment_date or alloc.invoice_date or alloc.order_date or alloc.updated_at or alloc.created_at
                     alloc_dt = actual_dt.strftime("%d/%m/%Y") if actual_dt else datetime.utcnow().strftime("%d/%m/%Y")
 
-                    state_name = alloc.state_name or state_name
-                    party_name = alloc.party_name or f"AMAZON SELLER PORTAL CUSTOMER ({state_name[:3].upper()})"
-                    cust_gstin = alloc.customer_gstin or ""
+                    state_name = dest_state
+                    raw_party = (alloc.party_name or "").strip()
+                    party_name = raw_party if raw_party else default_b2c_party
 
                     row = [
                         sno, bill_no, alloc_dt, item_code, item_name, hsn_code, group_tax,
                         cust_gstin,
                         state_name,
                         party_name, pack_size, qty, rate_unit, gross_amt,
-                        "", "", igst if igst > 0 else "",
+                        sgst if sgst > 0 else "", cgst if cgst > 0 else "", igst if igst > 0 else "",
                         "", "", "", tax_3, net_amt, "",
-                        net_amt, "IGST", "", " ", f"AMZ-SYNC-{alloc.amazon_line_item_id or ''}", " ",
+                        net_amt, tax_region, "", " ", f"AMZ-SYNC-{alloc.amazon_line_item_id or ''}", " ",
                         "", "", "", "", order_id, godown_name,
                         pur_rate_str,
                         rate_1_str,
@@ -1153,6 +1391,8 @@ class SeriesReportService:
 
                     b_qty += qty
                     b_gross += gross_amt
+                    b_sgst += sgst
+                    b_cgst += cgst
                     b_igst += igst
                     b_net += net_amt
                     if pur_rate > 0:
@@ -1161,7 +1401,10 @@ class SeriesReportService:
                 subtotal_row = [
                     "", "BILL NO. WISE TOTALS",
                     "", "", "", "", "", "", "", "", "",
-                    b_qty, "", round(b_gross, 2), "", "", round(b_igst, 2) if b_igst > 0 else "",
+                    b_qty, "", round(b_gross, 2),
+                    round(b_sgst, 2) if b_sgst > 0 else "",
+                    round(b_cgst, 2) if b_cgst > 0 else "",
+                    round(b_igst, 2) if b_igst > 0 else "",
                     "", "", "", "", round(b_net, 2), "",
                     round(b_net, 2), "", "", "", "", "", "", "", "", "", "",
                     "", "", "", "", "", "", "", "", "", "", ""
@@ -1170,6 +1413,8 @@ class SeriesReportService:
 
                 grand_qty += b_qty
                 grand_gross += b_gross
+                grand_sgst += b_sgst
+                grand_cgst += b_cgst
                 grand_igst += b_igst
                 grand_net += b_net
                 grand_cost += b_cost
@@ -2375,18 +2620,14 @@ class SeriesReportService:
             date_from = date(now_dt.year, now_dt.month, 1)
 
         wh_clean = (warehouse_code or "").strip().upper()
-        alloc_date_col = func.coalesce(
-            AmazonLiveAllocation.shipment_date,
-            AmazonLiveAllocation.invoice_date,
-            AmazonLiveAllocation.order_date
-        )
+        is_in_series = (wh_clean == "IN")
+        alloc_date_col = get_allocation_date_expr(db, is_in_series)
 
-        # Remove restrictive status == SHIPPED filter to capture all invoices
+        # Exclude zero-qty synthetic stubs while capturing Shipments, Refunds, and valid Cancellations
         alloc_query = db.query(AmazonLiveAllocation).filter(
             or_(
                 AmazonLiveAllocation.allocated_qty > 0,
                 AmazonLiveAllocation.reconciled_qty > 0,
-                AmazonLiveAllocation.invoice_number.isnot(None)
             )
         )
         if company_id and wh_clean not in ("IN",):
@@ -2430,12 +2671,44 @@ class SeriesReportService:
         if date_to:
             alloc_query = alloc_query.filter(alloc_date_col <= datetime.combine(date_to, datetime.max.time()))
 
-        # Order by invoice date and invoice number
+        sort_date_col = (
+            func.coalesce(
+                AmazonLiveAllocation.invoice_date,
+                AmazonLiveAllocation.shipment_date,
+                AmazonLiveAllocation.order_date,
+            )
+            if is_in_series
+            else alloc_date_col
+        )
         allocations = alloc_query.order_by(
-            alloc_date_col.asc(),
+            sort_date_col.asc(),
             AmazonLiveAllocation.invoice_number.asc(),
             AmazonLiveAllocation.id.asc()
         ).all()
+
+        # Deduplicate duplicate cancellation/shipment rows per (order_id, sku, trans_type)
+        dedup_allocs = []
+        seen_mtr_keys: Dict[Tuple[str, str, str], int] = {}
+        for a in allocations:
+            a_st = (a.status.value if hasattr(a.status, "value") else str(a.status or "")).upper()
+            if a_st == "CANCELLED" or "_CANCEL" in (a.amazon_line_item_id or "").upper():
+                tt = "Cancel"
+            elif a_st in ("RETURNED", "REFUNDED") or "-C-" in (a.invoice_number or "") or (a.invoice_number or "").startswith("CN-") or "_REF" in (a.amazon_line_item_id or "").upper():
+                tt = "Refund"
+            else:
+                tt = "Shipment"
+            key = ((a.order_id or "").strip(), (a.sku or "").strip().upper(), tt)
+            if key not in seen_mtr_keys:
+                seen_mtr_keys[key] = len(dedup_allocs)
+                dedup_allocs.append(a)
+            else:
+                idx = seen_mtr_keys[key]
+                prev = dedup_allocs[idx]
+                if float(a.net_amount or 0) > float(prev.net_amount or 0) or (
+                    "_CANCEL" in (prev.amazon_line_item_id or "") and "_CANCEL" not in (a.amazon_line_item_id or "")
+                ):
+                    dedup_allocs[idx] = a
+        allocations = dedup_allocs
 
         # Cache reference lookups
         all_warehouses = db.query(Warehouse).all()
@@ -2443,7 +2716,8 @@ class SeriesReportService:
         wh_code_map = {w.code.upper(): w for w in all_warehouses if w.code}
 
         all_products = db.query(Product).all()
-        prod_map = {p.sku.upper(): p for p in all_products if p.sku}
+        prod_map_by_company = {(p.company_id, p.sku.upper()): p for p in all_products if p.sku}
+        prod_map_sku = {p.sku.upper(): p for p in all_products if p.sku}
 
         # Official GSTIN mapping for JSPL FC locations
         FC_GSTIN_MAP = {
@@ -2466,43 +2740,6 @@ class SeriesReportService:
             "VSHB": "04AAFCJ8215N1ZC"
         }
 
-        # State abbreviation to full state name and tax rate mappings
-        STATE_LOOKUP = {
-            "AN": ("Andaman and Nicobar Islands", "35"),
-            "AP": ("Andhra Pradesh", "28"),
-            "AR": ("Arunachal Pradesh", "12"),
-            "AS": ("Assam", "18"),
-            "BR": ("Bihar", "10"),
-            "CH": ("Chandigarh", "04"),
-            "CT": ("Chhattisgarh", "22"),
-            "DL": ("Delhi", "07"),
-            "GA": ("Goa", "30"),
-            "GJ": ("Gujarat", "24"),
-            "HR": ("Haryana", "06"),
-            "HP": ("Himachal Pradesh", "02"),
-            "JK": ("Jammu and Kashmir", "01"),
-            "JH": ("Jharkhand", "20"),
-            "KA": ("Karnataka", "29"),
-            "KL": ("Kerala", "32"),
-            "LA": ("Ladakh", "38"),
-            "MP": ("Madhya Pradesh", "23"),
-            "MH": ("Maharashtra", "27"),
-            "MN": ("Manipur", "14"),
-            "ML": ("Meghalaya", "17"),
-            "MZ": ("Mizoram", "15"),
-            "NL": ("Nagaland", "13"),
-            "OR": ("Odisha", "21"),
-            "PB": ("Punjab", "03"),
-            "RJ": ("Rajasthan", "08"),
-            "SK": ("Sikkim", "11"),
-            "TN": ("Tamil Nadu", "33"),
-            "TG": ("Telangana", "36"),
-            "TR": ("Tripura", "16"),
-            "UP": ("Uttar Pradesh", "09"),
-            "UT": ("Uttarakhand", "05"),
-            "WB": ("West Bengal", "19")
-        }
-
         data_rows: List[List[Any]] = []
 
         for alloc in allocations:
@@ -2511,21 +2748,19 @@ class SeriesReportService:
                 prefix = alloc.invoice_number.split("-")[0].upper()
                 wh = wh_code_map.get(prefix)
 
-            prod = prod_map.get((alloc.sku or "").upper())
+            prod, base_prod = resolve_product_and_base(
+                alloc.sku, alloc.company_id, prod_map_by_company, prod_map_sku
+            )
 
             # Dates
             inv_dt = alloc.invoice_date or alloc.shipment_date or alloc.order_date or alloc.created_at
             ord_dt = alloc.order_date or alloc.created_at or inv_dt
             ship_dt = alloc.shipment_date or inv_dt
 
-            inv_date_str = inv_dt.strftime("%d/%m/%Y %H:%M") if inv_dt else ""
-            order_date_str = ord_dt.strftime("%d/%m/%Y %H:%M") if ord_dt else ""
-            ship_date_str = ship_dt.strftime("%d/%m/%Y %H:%M") if ship_dt else ""
-
             # Determine transaction type
             alloc_status_str = (alloc.status.value if hasattr(alloc.status, "value") else str(alloc.status or "")).upper()
             is_returned = (alloc_status_str in ("RETURNED", "REFUNDED") or "-C-" in (alloc.invoice_number or "") or (alloc.invoice_number or "").startswith("CN-"))
-            is_cancelled = (alloc_status_str == "CANCELLED" or (not alloc.invoice_number and alloc_status_str == "CANCELLED"))
+            is_cancelled = (alloc_status_str == "CANCELLED")
 
             if is_cancelled:
                 trans_type = "Cancel"
@@ -2542,70 +2777,98 @@ class SeriesReportService:
             shipment_id = f"A{alloc.id:09d}{wh_prefix}"
             shipment_item_id = int(alloc.amazon_line_item_id) if (alloc.amazon_line_item_id and alloc.amazon_line_item_id.isdigit()) else (575786880000 + alloc.id)
             qty = alloc.allocated_qty or alloc.reconciled_qty or 1
-            item_desc = prod.name if prod and prod.name else (alloc.sku or "")
+            alloc_sku_upper = (alloc.sku or "").strip().upper()
+            prod_name_clean = (prod.name or "").strip() if prod else ""
+            if prod_name_clean and prod_name_clean.upper() != alloc_sku_upper:
+                item_desc = prod_name_clean
+            elif base_prod and base_prod.name:
+                item_desc = base_prod.name
+            else:
+                item_desc = prod_name_clean or (alloc.sku or "")
             asin = getattr(prod, "asin", None) or "B0DYNNSY96"
-            hsn = getattr(prod, "hsn", None) or alloc.hsn_code or "8424"
+            hsn = (
+                alloc.hsn_code
+                or (prod.hsn if prod and prod.hsn else "")
+                or ""
+            )
             sku = alloc.sku or ""
 
             # FC GSTIN
-            seller_gstin = FC_GSTIN_MAP.get(wh_prefix, "04AAFCJ8215N1ZC")
+            seller_gstin = FC_GSTIN_MAP.get(wh_prefix.upper(), "04AAFCJ8215N1ZC")
 
             # Ship-to State & Customer details
-            raw_state = alloc.state_name or "CHANDIGARH"
-            clean_state = raw_state.strip().upper()
-            ship_state_name, ship_state_code = "Chandigarh", "04"
-            for k, (sname, scode) in STATE_LOOKUP.items():
-                if k == clean_state or sname.upper() == clean_state or sname.upper() in clean_state:
-                    ship_state_name, ship_state_code = sname, scode
-                    break
-
             is_b2b = bool(alloc.customer_gstin and len(alloc.customer_gstin.strip()) >= 15)
             buyer_gstin = alloc.customer_gstin.strip() if is_b2b else None
-            tax_rate = float(prod.default_gst_rate or 18.0) if prod else 18.0
+            bill_state_name, bill_state_code, _ = resolve_state_info(
+                alloc.state_name or "CHANDIGARH", buyer_gstin, fallback_state="Chandigarh"
+            )
+            ship_state_name, ship_state_code, default_b2c_party = resolve_state_info(
+                alloc.state_name or "CHANDIGARH",
+                None if (alloc.state_name and alloc.state_name.strip()) else buyer_gstin,
+                fallback_state="Chandigarh"
+            )
+            fallback_rate = (
+                float(prod.default_gst_rate)
+                if (prod and prod.default_gst_rate is not None)
+                else (float(base_prod.default_gst_rate) if (base_prod and base_prod.default_gst_rate is not None) else 18.0)
+            )
+            tax_rate = fallback_rate
 
             # Amounts calculation
             if is_cancelled:
                 invoice_amt = 0.0
                 tax_exclusive_gross = 0.0
+                total_tax_amt = 0.0
                 cgst_amt = 0.0
                 sgst_amt = 0.0
                 igst_amt = 0.0
+                tax_rate = 0.0
                 credit_note_no = None
                 credit_note_date = None
             else:
-                raw_net = float(alloc.net_amount or 0.0)
-                raw_gross = float(alloc.gross_amount or 0.0)
-                raw_tax = float(alloc.tax_amount or 0.0)
+                raw_net = float(alloc.net_amount) if alloc.net_amount is not None else None
+                raw_gross = float(alloc.gross_amount) if alloc.gross_amount is not None else None
+                raw_tax = float(alloc.tax_amount) if alloc.tax_amount is not None else None
 
-                if raw_gross > 0 and raw_tax > 0:
-                    calc_rate = round((raw_tax / raw_gross) * 100)
-                    if calc_rate in (5, 12, 18, 28):
-                        tax_rate = calc_rate
-
-                if raw_gross == 0.0 and raw_net > 0.0:
+                if raw_gross is not None and raw_net is not None:
+                    if raw_tax is None:
+                        raw_tax = round(raw_net - raw_gross, 2)
+                    tax_rate = derive_gst_rate(raw_gross, raw_tax, fallback_rate)
+                elif raw_net is not None and raw_net != 0.0:
                     raw_gross = round(raw_net / (1 + (tax_rate / 100.0)), 2)
                     raw_tax = round(raw_net - raw_gross, 2)
-                elif raw_net == 0.0 and raw_gross > 0.0:
+                elif raw_gross is not None and raw_gross != 0.0:
                     raw_tax = round(raw_gross * (tax_rate / 100.0), 2)
                     raw_net = round(raw_gross + raw_tax, 2)
+                else:
+                    raw_gross = 0.0
+                    raw_tax = 0.0
+                    raw_net = 0.0
+                    tax_rate = 0.0
 
                 # Intrastate vs Interstate
-                is_intra = (seller_gstin[:2] == ship_state_code)
-                if is_intra:
+                is_intra = (seller_gstin[:2] == bill_state_code)
+                if abs(raw_tax) <= 0.005:
+                    cgst_amt = 0.0
+                    sgst_amt = 0.0
+                    igst_amt = 0.0
+                elif is_intra:
                     cgst_amt = round(raw_tax / 2.0, 2)
-                    sgst_amt = round(raw_tax / 2.0, 2)
+                    sgst_amt = round(raw_tax - cgst_amt, 2)
                     igst_amt = 0.0
                 else:
                     cgst_amt = 0.0
                     sgst_amt = 0.0
                     igst_amt = round(raw_tax, 2)
 
-                tax_exclusive_gross = raw_gross
-                invoice_amt = raw_net
+                tax_exclusive_gross = round(raw_gross, 2)
+                invoice_amt = round(raw_net, 2)
+                total_tax_amt = round(raw_tax, 2)
 
                 if is_returned:
                     qty = -abs(qty)
                     tax_exclusive_gross = -abs(tax_exclusive_gross)
+                    total_tax_amt = -abs(total_tax_amt)
                     cgst_amt = -abs(cgst_amt)
                     sgst_amt = -abs(sgst_amt)
                     igst_amt = -abs(igst_amt)
@@ -2616,8 +2879,8 @@ class SeriesReportService:
                     credit_note_no = None
                     credit_note_date = None
 
-            cgst_rate = (tax_rate / 2.0) if (cgst_amt != 0.0) else 0.0
-            sgst_rate = (tax_rate / 2.0) if (sgst_amt != 0.0) else 0.0
+            cgst_rate = round(tax_rate / 2.0, 2) if (cgst_amt != 0.0) else 0.0
+            sgst_rate = round(tax_rate / 2.0, 2) if (sgst_amt != 0.0) else 0.0
             igst_rate = tax_rate if (igst_amt != 0.0) else 0.0
 
             # 86-column official Logic ERP MTR Row
@@ -2648,12 +2911,12 @@ class SeriesReportService:
                 seller_gstin,           # 23: Ship From Gstin
                 "160002",               # 24: Ship From Postal Code
                 "Chandigarh",           # 25: Ship From State
-                alloc.party_name or f"Customer ({ship_state_name})", # 26: Ship To Name
+                (alloc.party_name or "").strip() or default_b2c_party, # 26: Ship To Name
                 ship_state_name,        # 27: Ship To City
                 "IN",                   # 28: Ship To Country
                 invoice_amt,            # 29: Invoice Amount
                 tax_exclusive_gross,    # 30: Tax Exclusive Gross
-                cgst_amt,               # 31: Total Tax Amount (or cgst)
+                total_tax_amt,          # 31: Total Tax Amount
                 cgst_rate,              # 32: Cgst Rate
                 cgst_amt,               # 33: Cgst Amount
                 sgst_rate,              # 34: Sgst Rate
@@ -2665,7 +2928,7 @@ class SeriesReportService:
                 0.0,                    # 40: Cess Rate
                 0.0,                    # 41: Cess Amount
                 None,                   # 42: Warehouse Id
-                ship_state_name,        # 43: Customer Bill To State
+                bill_state_name,        # 43: Customer Bill To State
                 ship_state_name,        # 44: Customer Ship To State
                 buyer_gstin,            # 45: Buyer Gstin
                 "IN",                   # 46: Place of Supply
