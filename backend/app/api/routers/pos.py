@@ -957,6 +957,7 @@ def _build_invoice_dto(sale: Sale, db: Session = None, is_new: bool = False) -> 
             "line_total": i.line_total,
         })
 
+    # 1. Base snapshots from the Sale record (immutable historical record)
     seller_name = sale.company_name_snapshot
     seller_gstin = sale.company_gstin_snapshot
     seller_address = sale.company_address_snapshot
@@ -965,21 +966,21 @@ def _build_invoice_dto(sale: Sale, db: Session = None, is_new: bool = False) -> 
     seller_email = sale.company_email_snapshot
     seller_phone = sale.company_phone_snapshot
 
-    if origin_wh_id:
+    # 2. Only fallback to warehouse/hub if snapshot fields are missing (e.g. historical sales before snapshot columns were introduced)
+    if origin_wh_id and (not seller_address or not seller_gstin):
         wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == origin_wh_id).first()
         if wh:
-            if wh.warehouse_type != WarehouseType.CENTRAL:
-                if wh.hub:
-                    if wh.hub.gstin: seller_gstin = wh.hub.gstin
-                    if wh.hub.state: seller_state = wh.hub.state
-                    if wh.hub.state_code: seller_state_code = wh.hub.state_code
-                    if wh.hub.address: seller_address = wh.hub.address
-                    if wh.hub.phone: seller_phone = wh.hub.phone
-                    if wh.hub.email: seller_email = wh.hub.email
-            if wh.address and wh.address.strip():
+            if wh.warehouse_type != WarehouseType.CENTRAL and wh.hub:
+                if not seller_gstin and wh.hub.gstin: seller_gstin = wh.hub.gstin
+                if not seller_state and wh.hub.state: seller_state = wh.hub.state
+                if not seller_state_code and wh.hub.state_code: seller_state_code = wh.hub.state_code
+                if not seller_address and wh.hub.address: seller_address = wh.hub.address
+                if not seller_phone and wh.hub.phone: seller_phone = wh.hub.phone
+                if not seller_email and wh.hub.email: seller_email = wh.hub.email
+            if wh.address and wh.address.strip() and not seller_address:
                 seller_address = wh.address.strip()
-            if wh.phone_number: seller_phone = wh.phone_number
-            if wh.email: seller_email = wh.email
+            if wh.phone_number and not seller_phone: seller_phone = wh.phone_number
+            if wh.email and not seller_email: seller_email = wh.email
 
     company_code = "BKR" if sale.company_id == 2 else ("JSPL" if sale.company_id == 3 else None)
     if not company_code and sale.company:
