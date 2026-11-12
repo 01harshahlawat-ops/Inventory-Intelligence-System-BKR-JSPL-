@@ -957,6 +957,7 @@ def _build_invoice_dto(sale: Sale, db: Session = None, is_new: bool = False) -> 
             "line_total": i.line_total,
         })
 
+    # 1. Base snapshots from the Sale record (immutable historical record)
     seller_name = sale.company_name_snapshot
     seller_gstin = sale.company_gstin_snapshot
     seller_address = sale.company_address_snapshot
@@ -965,21 +966,21 @@ def _build_invoice_dto(sale: Sale, db: Session = None, is_new: bool = False) -> 
     seller_email = sale.company_email_snapshot
     seller_phone = sale.company_phone_snapshot
 
-    if origin_wh_id:
+    # 2. Only fallback to warehouse/hub if snapshot fields are missing (e.g. historical sales before snapshot columns were introduced)
+    if origin_wh_id and (not seller_address or not seller_gstin):
         wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == origin_wh_id).first()
         if wh:
-            if wh.warehouse_type != WarehouseType.CENTRAL:
-                if wh.hub:
-                    if wh.hub.gstin: seller_gstin = wh.hub.gstin
-                    if wh.hub.state: seller_state = wh.hub.state
-                    if wh.hub.state_code: seller_state_code = wh.hub.state_code
-                    if wh.hub.address: seller_address = wh.hub.address
-                    if wh.hub.phone: seller_phone = wh.hub.phone
-                    if wh.hub.email: seller_email = wh.hub.email
-            if wh.address and wh.address.strip():
+            if wh.warehouse_type != WarehouseType.CENTRAL and wh.hub:
+                if not seller_gstin and wh.hub.gstin: seller_gstin = wh.hub.gstin
+                if not seller_state and wh.hub.state: seller_state = wh.hub.state
+                if not seller_state_code and wh.hub.state_code: seller_state_code = wh.hub.state_code
+                if not seller_address and wh.hub.address: seller_address = wh.hub.address
+                if not seller_phone and wh.hub.phone: seller_phone = wh.hub.phone
+                if not seller_email and wh.hub.email: seller_email = wh.hub.email
+            if wh.address and wh.address.strip() and not seller_address:
                 seller_address = wh.address.strip()
-            if wh.phone_number: seller_phone = wh.phone_number
-            if wh.email: seller_email = wh.email
+            if wh.phone_number and not seller_phone: seller_phone = wh.phone_number
+            if wh.email and not seller_email: seller_email = wh.email
 
     company_code = "BKR" if sale.company_id == 2 else ("JSPL" if sale.company_id == 3 else None)
     if not company_code and sale.company:
@@ -1511,7 +1512,7 @@ def update_sale(
     target_company_code = target_company.code if target_company else "CO"
 
     if payload.origin_warehouse_id:
-        default_warehouse = db.query(Warehouse).filter(
+        default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(
             Warehouse.id == payload.origin_warehouse_id,
             Warehouse.company_id == target_company_id,
             Warehouse.status == "ACTIVE"
@@ -1519,7 +1520,7 @@ def update_sale(
     else:
         sale_mov = db.query(InventoryMovement).filter(InventoryMovement.reference_id == sale.bill_number).first()
         if sale_mov:
-            default_warehouse = db.query(Warehouse).filter(Warehouse.id == sale_mov.warehouse_id).first()
+            default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == sale_mov.warehouse_id).first()
         else:
             default_warehouse = _resolve_default_warehouse(db, target_company_id)
         
@@ -1527,6 +1528,63 @@ def update_sale(
         default_warehouse = _resolve_default_warehouse(db, target_company_id)
     if not default_warehouse:
         raise HTTPException(status_code=400, detail="Warehouse not found for delta processing")
+
+    # Detect if billing warehouse has changed for this sale
+    all_sale_movs = db.query(InventoryMovement).filter(
+        (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number)
+    ).order_by(InventoryMovement.id.desc()).all()
+
+    sale_specific_movs = [
+        m for m in all_sale_movs
+        if (m.metadata_payload and str(m.metadata_payload.get("sale_id")) == str(sale.id))
+    ]
+    prior_movs = sale_specific_movs if sale_specific_movs else all_sale_movs
+    prior_wh_id = prior_movs[0].warehouse_id if prior_movs else None
+
+    warehouse_changed = (
+        prior_wh_id is not None
+        and default_warehouse is not None
+        and prior_wh_id != default_warehouse.id
+    )
+
+    # If warehouse changed, reverse previous inventory deductions from the old warehouse
+    if warehouse_changed and not payload.skip_inventory_update:
+        for old_it in sale.items:
+            product = db.query(Product).filter(Product.id == old_it.product_id).first()
+            if not product:
+                continue
+            is_service = (
+                (product.category in ['SERV', 'SERVICE'] or product.sku == 'SERVICE CHARGE' or product.hsn == '9987')
+                or old_it.sku == 'SERVICE CHARGE'
+                or old_it.hsn_sac == '9987'
+            )
+            if is_service:
+                continue
+            prior_wh = db.query(Warehouse).filter(Warehouse.id == prior_wh_id).first()
+            is_bkr_central_revert = (
+                target_company_code == "BKR" 
+                and prior_wh 
+                and (prior_wh.warehouse_type == WarehouseType.CENTRAL or (prior_wh.code or "").upper() == "BKR_CENTRAL")
+                and prior_wh_id in (39, 2)
+            )
+            wh_revert = 39 if is_bkr_central_revert else prior_wh_id
+            InventoryEventEngine.process_event(
+                db=db,
+                company_id=target_company_id,
+                product_sku=product.sku,
+                warehouse_id=wh_revert,
+                quantity=old_it.quantity,
+                event_type="ADD",
+                source="INVOICE_EDIT_WH_REVERSAL",
+                reference_id=sale.bill_number,
+                metadata_payload={
+                    "operation_id": f"REVERSAL_WH_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                    "sale_id": sale.id,
+                    "reverted_from_wh": prior_wh_id,
+                    "reverted_qty": old_it.quantity
+                },
+                allow_negative_stock=True
+            )
 
     # Update seller snapshot if warehouse is specified
     if default_warehouse:
@@ -1588,7 +1646,7 @@ def update_sale(
         existing_item = next((oi for oi in old_items.values() if oi.sku == (req_item.sku or product.sku)), None)
         
         delta_qty = req_item.quantity
-        if existing_item:
+        if existing_item and not warehouse_changed:
             delta_qty = req_item.quantity - existing_item.quantity
             
             # Update existing row
@@ -1726,7 +1784,7 @@ def update_sale(
             (oi.sku and oi.sku.strip().upper() == "SERVICE CHARGE")
             or (oi.hsn_sac and oi.hsn_sac.strip() == "9987")
         )
-        if not payload.skip_inventory_update and not is_oi_service:
+        if not payload.skip_inventory_update and not is_oi_service and not warehouse_changed:
             wh_target = 39 if default_warehouse.id in (39, 2) else default_warehouse.id
             InventoryEventEngine.process_event(
                 db=db,
@@ -1763,6 +1821,28 @@ def update_sale(
                     allow_negative_stock=True
                 )
         db.delete(oi)
+
+    if warehouse_changed:
+        # Update existing movement records to reflect the new warehouse
+        db.query(InventoryMovement).filter(
+            (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number),
+            InventoryMovement.source == "OFFLINE_POS"
+        ).update({"warehouse_id": default_warehouse.id}, synchronize_session=False)
+
+        AuditLogService.log(
+            db,
+            company_id=target_company_id,
+            entity_type="Sale",
+            entity_id=sale.id,
+            event_type="INVOICE_WAREHOUSE_CHANGED",
+            message=f"Invoice {sale.bill_number} billing warehouse changed from {prior_wh_id} to {default_warehouse.id} ({default_warehouse.name})",
+            metadata={
+                "bill_number": sale.bill_number,
+                "old_warehouse_id": prior_wh_id,
+                "new_warehouse_id": default_warehouse.id,
+                "user_id": user.id
+            }
+        )
 
     db.commit()
     return {"message": "Invoice updated successfully"}
