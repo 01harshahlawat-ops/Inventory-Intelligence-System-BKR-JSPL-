@@ -525,8 +525,8 @@ const EditInvoicePage = () => {
     let sellerPhone = selectedWh?.phone_number || selectedWh?.hub?.phone || companySettings?.phone;
     let sellerEmail = selectedWh?.email || selectedWh?.hub?.email || companySettings?.email;
 
-    if (selectedWh && selectedWh.warehouse_type !== 'CENTRAL') {
-      if (selectedWh.hub) {
+    if (selectedWh) {
+      if (selectedWh.warehouse_type !== 'CENTRAL' && selectedWh.hub) {
         if (selectedWh.hub.gstin) sellerGstin = selectedWh.hub.gstin;
         if (selectedWh.hub.state) sellerState = selectedWh.hub.state;
         if (selectedWh.hub.state_code) sellerStateCode = selectedWh.hub.state_code;

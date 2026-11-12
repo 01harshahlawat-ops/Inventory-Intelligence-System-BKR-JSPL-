@@ -178,12 +178,10 @@ def search_products(q: str = "", warehouse_id: Optional[int] = None, company_id:
 
     if warehouse_id:
         default_warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id, Warehouse.company_id == company_id).first()
-        if default_warehouse and company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
-            default_warehouse = None
         if not default_warehouse:
-            default_warehouse = _resolve_default_bkr_warehouse(db, company_id)
+            default_warehouse = _resolve_default_warehouse(db, company_id)
     else:
-        default_warehouse = _resolve_default_bkr_warehouse(db, company_id)
+        default_warehouse = _resolve_default_warehouse(db, company_id)
 
     # If warehouse is BKR Central (39) or Auto Godown (2), combine their inventory for unified billing
     wh_ids = [39, 2] if default_warehouse.id in (39, 2) else [default_warehouse.id]
@@ -330,9 +328,6 @@ def complete_sale(
             Warehouse.company_id == company_id,
             Warehouse.status == "ACTIVE"
         ).first()
-        # For JSPL POS, if warehouse is not CENTRAL / VSHB, fallback to VSHB
-        if default_warehouse and company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
-            default_warehouse = None
         if not default_warehouse:
             default_warehouse = _resolve_default_warehouse(db, company_id)
     else:
@@ -444,20 +439,21 @@ def complete_sale(
         seller_email = (settings.email if settings else None)
         seller_phone = (settings.phone if settings else None)
 
-        if wh and wh.warehouse_type != WarehouseType.CENTRAL:
-            if wh.hub:
-                if wh.hub.gstin:
-                    seller_gstin = wh.hub.gstin
-                if wh.hub.state:
-                    seller_state = wh.hub.state
-                if wh.hub.state_code:
-                    seller_state_code = wh.hub.state_code
-                if wh.hub.address:
-                    seller_address = wh.hub.address
-                if wh.hub.phone:
-                    seller_phone = wh.hub.phone
-                if wh.hub.email:
-                    seller_email = wh.hub.email
+        if wh:
+            if wh.warehouse_type != WarehouseType.CENTRAL:
+                if wh.hub:
+                    if wh.hub.gstin:
+                        seller_gstin = wh.hub.gstin
+                    if wh.hub.state:
+                        seller_state = wh.hub.state
+                    if wh.hub.state_code:
+                        seller_state_code = wh.hub.state_code
+                    if wh.hub.address:
+                        seller_address = wh.hub.address
+                    if wh.hub.phone:
+                        seller_phone = wh.hub.phone
+                    if wh.hub.email:
+                        seller_email = wh.hub.email
             if wh.address and wh.address.strip():
                 seller_address = wh.address.strip()
             if wh.phone_number:
@@ -655,7 +651,12 @@ def complete_sale(
             entity_id=sale.id,
             event_type="INVOICE_CREATED",
             message="Invoice created from POS checkout",
-            metadata={"invoice_number": sale.invoice_number, "invoice_type": sale.invoice_type},
+            metadata={
+                "invoice_number": sale.invoice_number,
+                "invoice_type": sale.invoice_type,
+                "origin_warehouse_id": default_warehouse.id if default_warehouse else None,
+                "origin_warehouse_name": default_warehouse.name if default_warehouse else None
+            },
         )
         if commit:
             db.commit()
@@ -966,14 +967,15 @@ def _build_invoice_dto(sale: Sale, db: Session = None, is_new: bool = False) -> 
 
     if origin_wh_id:
         wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == origin_wh_id).first()
-        if wh and wh.warehouse_type != WarehouseType.CENTRAL:
-            if wh.hub:
-                if wh.hub.gstin: seller_gstin = wh.hub.gstin
-                if wh.hub.state: seller_state = wh.hub.state
-                if wh.hub.state_code: seller_state_code = wh.hub.state_code
-                if wh.hub.address: seller_address = wh.hub.address
-                if wh.hub.phone: seller_phone = wh.hub.phone
-                if wh.hub.email: seller_email = wh.hub.email
+        if wh:
+            if wh.warehouse_type != WarehouseType.CENTRAL:
+                if wh.hub:
+                    if wh.hub.gstin: seller_gstin = wh.hub.gstin
+                    if wh.hub.state: seller_state = wh.hub.state
+                    if wh.hub.state_code: seller_state_code = wh.hub.state_code
+                    if wh.hub.address: seller_address = wh.hub.address
+                    if wh.hub.phone: seller_phone = wh.hub.phone
+                    if wh.hub.email: seller_email = wh.hub.email
             if wh.address and wh.address.strip():
                 seller_address = wh.address.strip()
             if wh.phone_number: seller_phone = wh.phone_number
@@ -1514,8 +1516,6 @@ def update_sale(
             Warehouse.company_id == target_company_id,
             Warehouse.status == "ACTIVE"
         ).first()
-        if default_warehouse and target_company_code == "JSPL" and (default_warehouse.code or "").strip().upper() != "VSHB" and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
-            default_warehouse = None
     else:
         sale_mov = db.query(InventoryMovement).filter(InventoryMovement.reference_id == sale.bill_number).first()
         if sale_mov:
@@ -1528,17 +1528,18 @@ def update_sale(
     if not default_warehouse:
         raise HTTPException(status_code=400, detail="Warehouse not found for delta processing")
 
-    # Update seller snapshot if warehouse is non-central
-    if default_warehouse and default_warehouse.warehouse_type != WarehouseType.CENTRAL:
+    # Update seller snapshot if warehouse is specified
+    if default_warehouse:
         wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == default_warehouse.id).first()
         if wh:
-            if wh.hub:
-                if wh.hub.gstin: sale.company_gstin_snapshot = wh.hub.gstin
-                if wh.hub.state: sale.company_state_snapshot = wh.hub.state
-                if wh.hub.state_code: sale.company_state_code_snapshot = wh.hub.state_code
-                if wh.hub.address: sale.company_address_snapshot = wh.hub.address
-                if wh.hub.phone: sale.company_phone_snapshot = wh.hub.phone
-                if wh.hub.email: sale.company_email_snapshot = wh.hub.email
+            if wh.warehouse_type != WarehouseType.CENTRAL:
+                if wh.hub:
+                    if wh.hub.gstin: sale.company_gstin_snapshot = wh.hub.gstin
+                    if wh.hub.state: sale.company_state_snapshot = wh.hub.state
+                    if wh.hub.state_code: sale.company_state_code_snapshot = wh.hub.state_code
+                    if wh.hub.address: sale.company_address_snapshot = wh.hub.address
+                    if wh.hub.phone: sale.company_phone_snapshot = wh.hub.phone
+                    if wh.hub.email: sale.company_email_snapshot = wh.hub.email
             if wh.address and wh.address.strip():
                 sale.company_address_snapshot = wh.address.strip()
             if wh.phone_number:

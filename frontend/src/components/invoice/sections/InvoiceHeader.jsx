@@ -52,9 +52,6 @@ const InvoiceHeader = ({ company, invoiceType, tallyData, items, einvoice }) => 
     }
   } else {
     let rawAddr = (company?.address || '').trim();
-    if (rawAddr.includes('24/9')) {
-      rawAddr = 'Plot no: 150, Industrial & Business Park-2,\nChandigarh (UT)- 160002';
-    }
     if (rawAddr.includes('\n')) {
       const parts = rawAddr.split('\n');
       addressLine1 = parts[0].trim();
