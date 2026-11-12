@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiDownload, FiPlay, FiAlertCircle } from 'react-icons/fi';
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import { useNotificationStore } from '../../stores/notificationStore';
 import styles from './ExportCenter.module.css';
 
@@ -116,7 +117,7 @@ const ExportCenter = () => {
     }
   };
 
-  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(val);
+  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Math.round(val || 0));
 
   const currentCatObj = CATEGORY_CONFIG.find(c => c.id === documentCategory);
 
@@ -274,7 +275,7 @@ const ExportCenter = () => {
                         )}
                       </td>
                       <td style={{ fontWeight: 500 }}>{doc.invoice_number}</td>
-                      <td>{new Date(doc.invoice_date).toLocaleDateString()}</td>
+                      <td>{formatDate(doc.invoice_date)}</td>
                       <td>{doc.customer_name}</td>
                       <td>{formatCurrency(doc.grand_total)}</td>
                       <td>

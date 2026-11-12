@@ -1,19 +1,6 @@
 import React from 'react';
 import styles from '../InvoiceRenderer.module.css';
-
-const formatDate = (dateString) => {
-  if (!dateString) return '';
-  try {
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return String(dateString);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
-  } catch {
-    return String(dateString);
-  }
-};
+import { formatDate } from '../../../utils/dateUtils';
 
 const InvoiceDetailsBox = ({ invoice }) => {
   const customer = invoice?.customer || {};
@@ -30,7 +17,7 @@ const InvoiceDetailsBox = ({ invoice }) => {
   const shippingAddress = shipping?.address || '';
 
   const billNo = invoice?.invoice_number || invoice?.bill_number || '';
-  const billDate = formatDate(invoice?.date || invoice?.sale_date || invoice?.created_at);
+  const billDate = formatDate(invoice?.date || invoice?.sale_date || invoice?.created_at, '');
   const payMode = (invoice?.payment_method || 'CREDIT').toUpperCase();
   const transportMode = invoice?.dispatch_through || invoice?.transport_mode || '';
   const orderNo = invoice?.buyer_order_no || invoice?.order_no || '';

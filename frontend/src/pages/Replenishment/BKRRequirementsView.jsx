@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../constants/routes';
 import styles from './TransferList.module.css'; // Re-use existing table styles
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import { useNotificationStore } from '../../stores/notificationStore';
 
 const BKRRequirementsView = () => {
@@ -63,7 +64,7 @@ const BKRRequirementsView = () => {
               <tr key={trf.id}>
                 <td>{trf.transfer_number || trf.id}</td>
                 <td>{trf.from_company_name || 'JSPL'}</td>
-                <td>{new Date(trf.created_at).toLocaleDateString()}</td>
+                <td>{formatDate(trf.created_at)}</td>
                 <td>{trf.items?.length || 0}</td>
                 <td>
                   <span className={`${styles.badge} ${trf.status === 'Pending' ? styles.pending : styles.inProgress}`}>{trf.status}</span>

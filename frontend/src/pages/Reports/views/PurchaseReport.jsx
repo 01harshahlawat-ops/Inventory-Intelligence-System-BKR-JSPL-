@@ -4,6 +4,7 @@ import useCompanyStore from '../../../stores/useCompanyStore';
 import { reportsService } from '../../../services/reports';
 import { saveDownloadMetadata } from '../../../hooks/useDownloadHistory';
 import { DataTable } from '../../../components/DataTable';
+import { formatDate } from '../../../utils/dateUtils';
 import { FiDownload, FiFileText, FiRefreshCw, FiShoppingBag } from 'react-icons/fi';
 
 export const PurchaseReport = () => {
@@ -107,7 +108,7 @@ export const PurchaseReport = () => {
       label: 'Bill Date',
       render: (val, row) => {
         const dt = val || row.created_at;
-        return dt ? new Date(dt).toLocaleDateString('en-GB') : '-';
+        return formatDate(dt);
       }
     },
     {
@@ -164,7 +165,7 @@ export const PurchaseReport = () => {
       label: 'Net Amount (₹)',
       render: (val) => (
         <strong style={{ color: '#059669', fontSize: '13px' }}>
-          ₹{Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ₹{Math.round(Number(val || 0)).toLocaleString('en-IN')}
         </strong>
       )
     }
@@ -181,7 +182,7 @@ export const PurchaseReport = () => {
         <div style={{ padding: '14px 18px', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
           <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Total Purchases (₹)</div>
           <div style={{ fontSize: '22px', fontWeight: 700, color: '#059669', marginTop: '4px' }}>
-            ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{Math.round(totalAmount).toLocaleString('en-IN')}
           </div>
         </div>
       </div>

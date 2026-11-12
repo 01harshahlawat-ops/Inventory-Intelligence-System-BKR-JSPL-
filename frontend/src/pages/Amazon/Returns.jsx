@@ -5,6 +5,7 @@ import { warehouseService } from '../../services/warehouse';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { DataTable, TableHeader, TableRow } from '../../components/DataTable';
 import Button from '../../components/forms/Button';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './Returns.module.css';
 
 const AmazonReturns = () => {
@@ -142,7 +143,7 @@ const AmazonReturns = () => {
         { 
             key: 'received_at', 
             label: 'Received Date', 
-            render: (val) => val ? new Date(val).toLocaleDateString() : '-' 
+            render: (val) => formatDate(val) 
         },
         {
             key: 'actions',

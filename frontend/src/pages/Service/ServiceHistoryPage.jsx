@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import useCompanyStore from '../../stores/useCompanyStore';
 
 export default function ServiceHistoryPage() {
@@ -49,7 +50,7 @@ export default function ServiceHistoryPage() {
               {services.map(srv => (
                 <tr key={srv.id} style={{ transition: 'background-color 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
                   <td style={tdStyle}>#{srv.id}</td>
-                  <td style={tdStyle}>{new Date(srv.created_at || srv.date).toLocaleDateString()}</td>
+                  <td style={tdStyle}>{formatDate(srv.created_at || srv.date)}</td>
                   <td style={tdStyle}>{srv.customer_name || 'N/A'}</td>
                   <td style={tdStyle}>{srv.service_type}</td>
                   <td style={tdStyle}>

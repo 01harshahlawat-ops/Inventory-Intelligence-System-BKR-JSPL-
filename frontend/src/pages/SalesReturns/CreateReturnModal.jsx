@@ -135,7 +135,7 @@ export default function CreateReturnModal({ onClose, onSuccess }) {
             <option value="">-- Select an Invoice --</option>
             {sales.map(sale => (
               <option key={sale.id} value={sale.id}>
-                {sale.bill_number} - {sale.customer_name} - ₹{sale.grand_total?.toFixed(2)}
+                {sale.bill_number} - {sale.customer_name} - ₹{Math.round(sale.grand_total || 0)}
               </option>
             ))}
           </select>

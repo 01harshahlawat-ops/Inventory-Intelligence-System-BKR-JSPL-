@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { reportsService } from '../../../services/reports';
 import { DataTable } from '../../../components/DataTable';
 import { ReportToolbar } from '../../../components/Reporting/ReportToolbar';
+import { formatDate } from '../../../utils/dateUtils';
 
 export const DispatchReport = () => {
   const navigate = useNavigate();
@@ -30,11 +31,11 @@ export const DispatchReport = () => {
   const totalPages = data?.total_pages || Math.ceil(total / limit) || 1;
 
   const columns = [
-    { key: 'created_at', label: 'Date', render: (val) => new Date(val).toLocaleDateString() },
+    { key: 'created_at', label: 'Date', render: (val) => formatDate(val) },
     { key: 'dispatch_number', label: 'Dispatch No.' },
     { key: 'warehouse_name', label: 'Origin Warehouse' },
     { key: 'dispatch_status', label: 'Status' },
-    { key: 'total_items', label: 'Total Items' }
+    { key: 'total_items', label: 'Total Items', render: (val) => Math.round(Number(val || 0)) }
   ];
 
   return (

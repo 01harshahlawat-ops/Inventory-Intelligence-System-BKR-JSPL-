@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDate } from '../../utils/dateUtils';
 
 export default function ServiceBillRenderer({ service, company }) {
   if (!service) return null;
@@ -24,7 +25,7 @@ export default function ServiceBillRenderer({ service, company }) {
         <div>
           <p style={{ margin: '4px 0' }}><strong>Service ID:</strong> #{service.id}</p>
           <p style={{ margin: '4px 0' }}><strong>Customer Name:</strong> {service.customer_name || 'N/A'}</p>
-          <p style={{ margin: '4px 0' }}><strong>Date:</strong> {new Date(service.created_at || service.date).toLocaleDateString()}</p>
+          <p style={{ margin: '4px 0' }}><strong>Date:</strong> {formatDate(service.created_at || service.date)}</p>
         </div>
         <div style={{ textAlign: 'right' }}>
           <p style={{ margin: '4px 0' }}><strong>Status:</strong> {service.status}</p>
@@ -64,7 +65,7 @@ export default function ServiceBillRenderer({ service, company }) {
         <div style={{ width: '300px', borderTop: '2px solid black', paddingTop: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold' }}>
             <span>Total Amount:</span>
-            <span>₹{service.total_amount || 0}</span>
+            <span>₹{Math.round(service.total_amount || 0)}</span>
           </div>
         </div>
       </div>

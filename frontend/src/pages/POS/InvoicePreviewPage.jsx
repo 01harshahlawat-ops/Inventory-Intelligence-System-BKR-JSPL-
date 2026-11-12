@@ -18,6 +18,7 @@ import { einvoiceService } from '../../services/einvoice';
 import { handleApiError } from '../../utils/errorHandler';
 import InvoiceRenderer from '../../components/invoice/InvoiceRenderer';
 import { downloadInvoicePdf } from '../../services/invoicePdfService';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './InvoicePreviewPage.module.css';
 
 export default function InvoicePreviewPage() {
@@ -409,7 +410,7 @@ export default function InvoicePreviewPage() {
                   <div>
                     <div style={{ fontWeight: '600', color: '#0f172a' }}>Return #{ret.return_number}</div>
                     <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                      Date: {new Date(ret.date).toLocaleDateString()} &bull; Qty: {ret.returned_quantity} &bull; Status: <span style={{ fontWeight: '600', color: ret.status === 'Completed' ? '#16a34a' : '#ea580c' }}>{ret.status}</span>
+                      Date: {formatDate(ret.date)} &bull; Qty: {Math.round(ret.returned_quantity || 0)} &bull; Status: <span style={{ fontWeight: '600', color: ret.status === 'Completed' ? '#16a34a' : '#ea580c' }}>{ret.status}</span>
                     </div>
                   </div>
                   <button 

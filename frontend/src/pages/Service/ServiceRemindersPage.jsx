@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import useCompanyStore from '../../stores/useCompanyStore';
 
 export default function ServiceRemindersPage() {
@@ -59,7 +60,7 @@ export default function ServiceRemindersPage() {
             <tbody>
               {reminders.map(rem => (
                 <tr key={rem.id}>
-                  <td style={tdStyle}>{new Date(rem.reminder_date).toLocaleDateString()}</td>
+                  <td style={tdStyle}>{formatDate(rem.reminder_date)}</td>
                   <td style={tdStyle}>{rem.customer_name || 'N/A'}</td>
                   <td style={tdStyle}>{rem.note}</td>
                   <td style={tdStyle}>

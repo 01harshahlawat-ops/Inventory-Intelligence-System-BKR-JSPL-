@@ -6,6 +6,7 @@ import PageContainer from '../../components/layout/PageContainer';
 import { Card } from '../../components/Card/Card';
 import { DataTable, TableHeader, TableRow } from '../../components/DataTable';
 import Button from '../../components/forms/Button';
+import { formatDate } from '../../utils/dateUtils';
 import styles from '../Warehouse/Warehouse.module.css';
 
 const DamageClaimManager = () => {
@@ -68,7 +69,7 @@ const DamageClaimManager = () => {
                           {claim.description && <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '4px' }}>{claim.description}</div>}
                         </div>
                       ),
-                      date: claim.created_at ? new Date(claim.created_at).toLocaleDateString() : '-',
+                      date: formatDate(claim.created_at),
                       status: (
                         <span style={{
                           padding: '4px 8px',

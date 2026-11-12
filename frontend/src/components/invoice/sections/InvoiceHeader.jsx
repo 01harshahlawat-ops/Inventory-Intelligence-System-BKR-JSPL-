@@ -1,6 +1,7 @@
 import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import styles from '../InvoiceRenderer.module.css';
+import { formatDate } from '../../../utils/dateUtils';
 
 const InvoiceHeader = ({ company, invoiceType, tallyData, items, einvoice }) => {
   const hasOnlyZeroGst = items?.length > 0 && items.every(item => parseFloat(item.gst_rate || 0) === 0);
@@ -16,12 +17,7 @@ const InvoiceHeader = ({ company, invoiceType, tallyData, items, einvoice }) => 
 
   const formattedAckDate = React.useMemo(() => {
     if (!ackDate) return '';
-    try {
-      const d = new Date(ackDate);
-      return isNaN(d.getTime()) ? String(ackDate) : d.toLocaleDateString('en-IN');
-    } catch {
-      return String(ackDate);
-    }
+    return formatDate(ackDate, '');
   }, [ackDate]);
 
   // Robust BKR vs JSPL detection

@@ -6,6 +6,7 @@ import { reportsService } from '../../../services/reports';
 import { saveDownloadMetadata } from '../../../hooks/useDownloadHistory';
 import { DataTable } from '../../../components/DataTable';
 import { ReportToolbar } from '../../../components/Reporting/ReportToolbar';
+import { formatDate } from '../../../utils/dateUtils';
 import { FiDownload, FiFileText, FiShoppingBag } from 'react-icons/fi';
 
 export const SalesReport = () => {
@@ -228,12 +229,12 @@ export const SalesReport = () => {
   const totalPages = data?.total_pages || Math.ceil(total / limit) || 1;
 
   const columns = [
-    { key: 'period', label: 'Period / Date' },
+    { key: 'period', label: 'Period / Date', render: (val) => formatDate(val, val || '-') },
     { key: 'total_orders', label: 'Total Orders' },
-    { key: 'total_items_sold', label: 'Items Sold' },
-    { key: 'total_taxable_amount', label: 'Taxable Amount', render: (val) => val != null ? `₹${Number(val || 0).toFixed(2)}` : '-' },
-    { key: 'total_tax', label: 'Total GST', render: (val) => val != null ? `₹${Number(val || 0).toFixed(2)}` : '-' },
-    { key: 'total_revenue', label: 'Total Revenue', render: (val) => `₹${Number(val || 0).toFixed(2)}` }
+    { key: 'total_items_sold', label: 'Items Sold', render: (val) => val != null ? Math.round(Number(val || 0)) : '-' },
+    { key: 'total_taxable_amount', label: 'Taxable Amount', render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-' },
+    { key: 'total_tax', label: 'Total GST', render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-' },
+    { key: 'total_revenue', label: 'Total Revenue', render: (val) => `₹${Math.round(Number(val || 0))}` }
   ];
 
   return (

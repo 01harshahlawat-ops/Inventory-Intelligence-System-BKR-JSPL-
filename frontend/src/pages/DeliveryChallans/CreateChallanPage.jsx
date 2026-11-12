@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { deliveryChallanService } from '../../services/deliveryChallanService';
 import useCompanyStore from '../../stores/useCompanyStore';
 import api from '../../services/api';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './DeliveryChallansPage.module.css';
 
 export default function CreateChallanPage() {
@@ -94,7 +95,7 @@ export default function CreateChallanPage() {
             <option value="">-- Select an Invoice --</option>
             {sales.map(sale => (
               <option key={sale.id} value={sale.id}>
-                {sale.bill_number} - {sale.customer_name} ({new Date(sale.sale_date).toLocaleDateString()})
+                {sale.bill_number} - {sale.customer_name} ({formatDate(sale.sale_date)})
               </option>
             ))}
           </select>

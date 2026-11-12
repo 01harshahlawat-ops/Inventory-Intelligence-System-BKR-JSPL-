@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './SalesReturnsPage.module.css';
 
 export default function ViewReturnModal({ returnDetails, onClose }) {
@@ -29,7 +30,7 @@ export default function ViewReturnModal({ returnDetails, onClose }) {
               {returnDetails.status}
             </span>
           </div>
-          <div><strong>Date:</strong> {new Date(returnDetails.return_date || returnDetails.created_at).toLocaleString()}</div>
+          <div><strong>Date:</strong> {formatDate(returnDetails.return_date || returnDetails.created_at)}</div>
           <div><strong>Customer:</strong> {returnDetails.customer_name || 'Walk-in Customer'}</div>
           <div><strong>Return Type:</strong> {returnDetails.return_type}</div>
         </div>
@@ -55,10 +56,10 @@ export default function ViewReturnModal({ returnDetails, onClose }) {
                     <small style={{ color: '#666' }}>SKU: {item.sku_snapshot}</small>
                   </td>
                   <td>{item.return_reason}</td>
-                  <td style={{ textAlign: 'right' }}>{item.returned_quantity} {item.unit_snapshot}</td>
-                  <td style={{ textAlign: 'right' }}>₹ {item.unit_price?.toFixed(2)}</td>
-                  <td style={{ textAlign: 'right' }}>₹ {item.tax_amount?.toFixed(2)}</td>
-                  <td style={{ textAlign: 'right' }}>₹ {item.total_price?.toFixed(2)}</td>
+                  <td style={{ textAlign: 'right' }}>{Math.round(item.returned_quantity || 0)} {item.unit_snapshot}</td>
+                  <td style={{ textAlign: 'right' }}>₹ {Math.round(item.unit_price || 0)}</td>
+                  <td style={{ textAlign: 'right' }}>₹ {Math.round(item.tax_amount || 0)}</td>
+                  <td style={{ textAlign: 'right' }}>₹ {Math.round(item.total_price || 0)}</td>
                 </tr>
               ))}
               {(!returnDetails.items || returnDetails.items.length === 0) && (
@@ -70,8 +71,8 @@ export default function ViewReturnModal({ returnDetails, onClose }) {
             <tfoot>
               <tr style={{ background: '#f9fafb', fontWeight: 'bold' }}>
                 <td colSpan="4" style={{ textAlign: 'right' }}>Totals:</td>
-                <td style={{ textAlign: 'right' }}>₹ {returnDetails.total_tax?.toFixed(2) || '0.00'}</td>
-                <td style={{ textAlign: 'right' }}>₹ {returnDetails.grand_total?.toFixed(2) || '0.00'}</td>
+                <td style={{ textAlign: 'right' }}>₹ {Math.round(returnDetails.total_tax || 0)}</td>
+                <td style={{ textAlign: 'right' }}>₹ {Math.round(returnDetails.grand_total || 0)}</td>
               </tr>
             </tfoot>
           </table>

@@ -5,6 +5,7 @@ import { deliveryChallanService } from '../../services/deliveryChallanService';
 import useCompanyStore from '../../stores/useCompanyStore';
 import { DataTable, TableHeader, TableRow } from '../../components/DataTable';
 import Button from '../../components/forms/Button';
+import { formatDate } from '../../utils/dateUtils';
 import styles from './DeliveryChallansPage.module.css';
 
 export default function DeliveryChallansPage() {
@@ -44,7 +45,7 @@ export default function DeliveryChallansPage() {
     { 
       key: 'challan_date', 
       label: 'Date', 
-      render: (val) => new Date(val).toLocaleDateString() 
+      render: (val) => formatDate(val) 
     },
     { 
       key: 'status', 

@@ -3,6 +3,7 @@ import api from '../../services/api';
 import PageContainer from '../../components/layout/PageContainer';
 import { Card } from '../../components/Card/Card';
 import { DataTable, TableHeader, TableRow } from '../../components/DataTable';
+import { formatDate } from '../../utils/dateUtils';
 import styles from '../Warehouse/Warehouse.module.css';
 
 const DispatchDashboard = () => {
@@ -86,7 +87,7 @@ const DispatchDashboard = () => {
                           {dispatch.dispatch_status}
                         </span>
                       ),
-                      created_at: dispatch.created_at ? new Date(dispatch.created_at).toLocaleDateString() : '-'
+                      created_at: formatDate(dispatch.created_at)
                     }} 
                     columns={columns} 
                   />
