@@ -4,7 +4,7 @@ import styles from '../InvoiceRenderer.module.css';
 const formatNum = (val) => {
   if (val === null || val === undefined || val === '') return '';
   const n = Number(val);
-  return isNaN(n) ? '' : String(Math.round(n));
+  return isNaN(n) ? '' : n.toFixed(2);
 };
 
 const InvoiceItems = ({ items = [], isInterState = false }) => {
@@ -58,7 +58,7 @@ const InvoiceItems = ({ items = [], isInterState = false }) => {
               : Math.max(0, gross - discount);
 
             const gstRate = parseFloat(item.gst_rate || 0);
-            const halfRate = gstRate > 0 ? String(Math.round(gstRate / 2)) : '';
+            const halfRate = (gstRate / 2).toFixed(2);
             
             const cgstAmt = item.cgst !== undefined ? parseFloat(item.cgst) : (taxableVal * (gstRate / 200));
             const sgstAmt = item.sgst !== undefined ? parseFloat(item.sgst) : (taxableVal * (gstRate / 200));
@@ -81,13 +81,13 @@ const InvoiceItems = ({ items = [], isInterState = false }) => {
                 </td>
                 <td className={styles.tdLeft}>{item.pack_grade || (item.sku === 'SERVICE CHARGE' || item.hsn_sac === '9987' ? 'SERV' : '')}</td>
                 <td className={styles.tdCenter}>{item.hsn_sac || item.hsn || ''}</td>
-                <td className={styles.tdQty}>{Math.round(qty)}</td>
+                <td className={styles.tdQty}>{qty.toFixed(2)}</td>
                 <td className={styles.tdRate}>{formatNum(rate)}</td>
                 <td className={styles.tdRight}>{cdDisplay}</td>
                 <td className={styles.tdCenter}>{taxLabel}</td>
                 {isInterState ? (
                   <>
-                    <td className={styles.tdRight}>{gstRate > 0 ? String(Math.round(gstRate)) : ''}</td>
+                    <td className={styles.tdRight}>{gstRate > 0 ? gstRate.toFixed(2) : ''}</td>
                     <td className={styles.tdRight}>{formatNum(igstAmt)}</td>
                   </>
                 ) : (

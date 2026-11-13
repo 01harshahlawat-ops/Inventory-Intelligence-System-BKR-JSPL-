@@ -6,7 +6,10 @@ import { amountInWords } from '../../utils/amountInWords';
 import { formatDate } from '../../utils/dateUtils';
 
 const formatCurrency = (val) => {
-  return Math.round(Number(val || 0)).toLocaleString('en-IN');
+  return Number(val || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 };
 
 export default function DeliveryChallanRenderer({ challan }) {

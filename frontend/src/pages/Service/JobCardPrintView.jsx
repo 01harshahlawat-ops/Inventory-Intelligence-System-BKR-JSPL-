@@ -91,9 +91,9 @@ const JobCardPrintView = () => {
                 <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
                   <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{idx + 1}</td>
                   <td style={{ padding: '0.5rem', border: '1px solid #e5e7eb' }}>{item.item_name}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{Math.round(item.qty || 0)}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{Math.round(item.rate || 0)}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{Math.round((item.qty || 0) * (item.rate || 0))}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'center', border: '1px solid #e5e7eb' }}>{item.qty}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{item.rate?.toFixed(2)}</td>
+                  <td style={{ padding: '0.5rem', textAlign: 'right', border: '1px solid #e5e7eb' }}>{(item.qty * item.rate).toFixed(2)}</td>
                 </tr>
               ))}
               {(!jobCard.items || jobCard.items.length === 0) && (

@@ -138,10 +138,11 @@ export default function CreateReturnModal({ onClose, onSuccess }) {
           return;
         }
 
-        const price = Math.round(parseFloat(amazonUnitPrice) || 0);
+        const price = parseFloat(amazonUnitPrice) || 0;
         const gst = parseFloat(amazonGstRate) || 18;
-        const taxable = Math.round(price * parseInt(amazonQty));
-        const taxAmt = Math.round(taxable * (gst / 100));
+        const taxable = parseFloat((price * parseInt(amazonQty)).toFixed(2));
+        const taxAmt = parseFloat((taxable * (gst / 100)).toFixed(2));
+        const grand = parseFloat((taxable + taxAmt).toFixed(2));
 
         await api.post('/api/sales-returns/draft', {
           return_type: 'AMAZON',
@@ -149,7 +150,7 @@ export default function CreateReturnModal({ onClose, onSuccess }) {
           customer_name: `${amazonCustomerName} (${amazonCustomerState}) - Order: ${amazonOrderId || 'Direct'}`,
           total_taxable_amount: taxable,
           total_tax: taxAmt,
-          grand_total: taxable + taxAmt,
+          grand_total: grand,
           items: [{
             sku_snapshot: amazonSku.trim().toUpperCase(),
             product_name_snapshot: amazonProductName.trim() || amazonSku.trim().toUpperCase(),
@@ -262,7 +263,7 @@ export default function CreateReturnModal({ onClose, onSuccess }) {
                 <option value="">-- Select an Invoice / Bill --</option>
                 {sales.map(sale => (
                   <option key={sale.id} value={sale.id}>
-                    {sale.invoice_number || sale.bill_number} - {sale.customer_name || 'Walk-in'} - ₹{Math.round(sale.grand_total || 0)}
+                    {sale.invoice_number || sale.bill_number} - {sale.customer_name || 'Walk-in'} - ₹{Number(sale.grand_total || 0).toFixed(2)}
                   </option>
                 ))}
               </select>
@@ -285,7 +286,7 @@ export default function CreateReturnModal({ onClose, onSuccess }) {
                       <tr key={item.id}>
                         <td>
                           <div><strong>{item.product_name}</strong></div>
-                          <small style={{ color: '#6b7280' }}>SKU: {item.sku} | Price: ₹{Math.round(item.price || item.unit_price || 0)}</small>
+                          <small style={{ color: '#6b7280' }}>SKU: {item.sku} | Price: ₹{Number(item.price || item.unit_price || 0).toFixed(2)}</small>
                         </td>
                         <td style={{ textAlign: 'center' }}>{item.quantity}</td>
                         <td style={{ textAlign: 'center' }}>

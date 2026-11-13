@@ -269,7 +269,7 @@ const JSPLReplenishmentView = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#6b7280', fontSize: '0.875rem' }}>Total Amount:</span>
                 <span style={{ fontWeight: 700, color: '#059669', fontSize: '1rem' }}>
-                  ₹{Math.round(Number(completedInvoice.grandTotal || 0)).toLocaleString('en-IN')}
+                  ₹{Number(completedInvoice.grandTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             </div>

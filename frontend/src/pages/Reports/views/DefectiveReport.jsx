@@ -34,7 +34,7 @@ export const DefectiveReport = () => {
     { key: 'created_at', label: 'Date', render: (val) => formatDate(val) },
     { key: 'sku', label: 'SKU' },
     { key: 'product_name', label: 'Product Name' },
-    { key: 'quantity', label: 'Quantity', render: (val) => Math.round(Number(val || 0)) },
+    { key: 'quantity', label: 'Quantity' },
     { key: 'return_reason', label: 'Defect Reason' },
     { key: 'status', label: 'Status' }
   ];

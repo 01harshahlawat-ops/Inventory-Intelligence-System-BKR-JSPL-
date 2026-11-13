@@ -42,7 +42,7 @@ const WarehouseDashboard = () => {
           </Card>
           <Card>
             <h3 style={{ color: '#6b7280', fontSize: '0.875rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Inventory Value</h3>
-            <p className={styles.metric}>₹{Math.round(metrics.inventoryValue || 0).toLocaleString('en-IN')}</p>
+            <p className={styles.metric}>₹{metrics.inventoryValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </Card>
           <Card>
             <h3 style={{ color: '#6b7280', fontSize: '0.875rem', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Low Stock Items</h3>

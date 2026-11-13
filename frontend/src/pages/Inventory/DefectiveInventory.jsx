@@ -81,7 +81,7 @@ const DefectiveInventory = () => {
                                             sku: item.sku_snapshot,
                                             product: item.product_name_snapshot,
                                             returnId: item.amazon_return_id,
-                                            qty: Math.round(item.quantity || 0),
+                                            qty: item.quantity,
                                             reason: item.return_reason,
                                             remarks: item.inspection_notes || '-',
                                             status: (

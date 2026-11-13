@@ -122,7 +122,7 @@ export default function SalesReturnsPage() {
                       {ret.status}
                     </span>
                   </td>
-                  <td>₹ {Math.round(ret.grand_total || 0)}</td>
+                  <td>₹ {ret.grand_total?.toFixed(2) || '0.00'}</td>
                   <td>
                     <div style={{ display: 'flex', gap: '12px' }}>
                       <button className={styles.actionButton} onClick={() => setViewReturn(ret)}>

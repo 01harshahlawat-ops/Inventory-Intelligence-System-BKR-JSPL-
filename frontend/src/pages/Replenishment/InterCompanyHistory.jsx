@@ -62,8 +62,8 @@ const InterCompanyHistory = () => {
                     <td>{trf.from_company_name}</td>
                     <td>{trf.to_company_name}</td>
                     <td>{trf.invoice_id || '-'}</td>
-                    <td>{Math.round(trf.total_qty || 0)}</td>
-                    <td>₹{Math.round(trf.total_amount || 0)}</td>
+                    <td>{trf.total_qty}</td>
+                    <td>₹{(trf.total_amount || 0).toFixed(2)}</td>
                     <td>
                       <span className={`${styles.status} ${styles[(trf.status || '').toLowerCase()] || ''}`}>
                         {trf.status}

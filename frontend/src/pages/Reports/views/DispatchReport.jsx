@@ -35,7 +35,7 @@ export const DispatchReport = () => {
     { key: 'dispatch_number', label: 'Dispatch No.' },
     { key: 'warehouse_name', label: 'Origin Warehouse' },
     { key: 'dispatch_status', label: 'Status' },
-    { key: 'total_items', label: 'Total Items', render: (val) => Math.round(Number(val || 0)) }
+    { key: 'total_items', label: 'Total Items' }
   ];
 
   return (

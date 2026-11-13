@@ -24,8 +24,8 @@ const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {
     window.print();
   };
 
-  const grandTotal = Math.round(totals.grand_total || returnData.grand_total || 0);
-  const wordsText = amountInWords(grandTotal);
+  const grandTotal = Number(totals.grand_total || returnData.grand_total || 0);
+  const wordsText = amountInWords(Math.round(grandTotal));
 
   return (
     <div className={styles.creditNoteWrapper} ref={ref}>
@@ -143,14 +143,14 @@ const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {
           </thead>
           <tbody>
             {items.map((item, index) => {
-              const qty = Math.round(item.quantity || item.returned_quantity || 1);
-              const unitPrice = Math.round(item.unit_price || 0);
-              const taxable = Math.round(item.taxable_amount || (qty * unitPrice));
-              const gstRate = Math.round(item.tax_rate || 18);
-              const cgst = Math.round(item.cgst || 0);
-              const sgst = Math.round(item.sgst || 0);
-              const igst = Math.round(item.igst || 0);
-              const total = Math.round(item.total_price || (taxable + cgst + sgst + igst));
+              const qty = Number(item.quantity || item.returned_quantity || 1);
+              const unitPrice = Number(item.unit_price || 0);
+              const taxable = Number(item.taxable_amount || (qty * unitPrice));
+              const gstRate = Number(item.tax_rate || 18);
+              const cgst = Number(item.cgst || 0);
+              const sgst = Number(item.sgst || 0);
+              const igst = Number(item.igst || 0);
+              const total = Number(item.total_price || (taxable + cgst + sgst + igst));
 
               return (
                 <tr key={item.id || index}>
@@ -162,18 +162,18 @@ const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {
                   <td style={{ textAlign: 'center' }}>{item.hsn || item.hsn_snapshot || '9503'}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600 }}>{qty}</td>
                   <td style={{ textAlign: 'center' }}>{item.unit || item.unit_snapshot || 'PCS'}</td>
-                  <td style={{ textAlign: 'right' }}>₹{unitPrice}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{taxable}</td>
+                  <td style={{ textAlign: 'right' }}>₹{unitPrice.toFixed(2)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{taxable.toFixed(2)}</td>
                   <td style={{ textAlign: 'center' }}>{gstRate}%</td>
                   {!is_interstate ? (
                     <>
-                      <td style={{ textAlign: 'right' }}>₹{cgst}</td>
-                      <td style={{ textAlign: 'right' }}>₹{sgst}</td>
+                      <td style={{ textAlign: 'right' }}>₹{cgst.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>₹{sgst.toFixed(2)}</td>
                     </>
                   ) : (
-                    <td style={{ textAlign: 'right' }}>₹{igst}</td>
+                    <td style={{ textAlign: 'right' }}>₹{igst.toFixed(2)}</td>
                   )}
-                  <td style={{ textAlign: 'right', fontWeight: 700 }}>₹{total}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>₹{total.toFixed(2)}</td>
                 </tr>
               );
             })}
@@ -210,17 +210,17 @@ const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {
               {totals.tax_breakdown.map((b, idx) => (
                 <tr key={idx}>
                   <td style={{ textAlign: 'center' }}>{b.hsn}</td>
-                  <td>₹{Math.round(b.taxable || 0)}</td>
-                  <td style={{ textAlign: 'center' }}>{Math.round(b.gst_rate || 0)}%</td>
+                  <td>₹{Number(b.taxable || 0).toFixed(2)}</td>
+                  <td style={{ textAlign: 'center' }}>{b.gst_rate}%</td>
                   {!is_interstate ? (
                     <>
-                      <td>₹{Math.round(b.cgst || 0)}</td>
-                      <td>₹{Math.round(b.sgst || 0)}</td>
+                      <td>₹{Number(b.cgst || 0).toFixed(2)}</td>
+                      <td>₹{Number(b.sgst || 0).toFixed(2)}</td>
                     </>
                   ) : (
-                    <td>₹{Math.round(b.igst || 0)}</td>
+                    <td>₹{Number(b.igst || 0).toFixed(2)}</td>
                   )}
-                  <td style={{ fontWeight: 700 }}>₹{Math.round(b.total_tax || 0)}</td>
+                  <td style={{ fontWeight: 700 }}>₹{Number(b.total_tax || 0).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -236,38 +236,38 @@ const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {
           <div className={styles.numbersBox}>
             <div className={styles.summaryLine}>
               <span>Total Taxable Value:</span>
-              <span>₹{Math.round(totals.total_taxable_amount || returnData.total_taxable_amount || 0)}</span>
+              <span>₹{Number(totals.total_taxable_amount || returnData.total_taxable_amount || 0).toFixed(2)}</span>
             </div>
             {!is_interstate ? (
               <>
                 <div className={styles.summaryLine}>
                   <span>Total CGST:</span>
-                  <span>₹{Math.round(totals.cgst_amount || 0)}</span>
+                  <span>₹{Number(totals.cgst_amount || 0).toFixed(2)}</span>
                 </div>
                 <div className={styles.summaryLine}>
                   <span>Total SGST:</span>
-                  <span>₹{Math.round(totals.sgst_amount || 0)}</span>
+                  <span>₹{Number(totals.sgst_amount || 0).toFixed(2)}</span>
                 </div>
               </>
             ) : (
               <div className={styles.summaryLine}>
                 <span>Total IGST:</span>
-                <span>₹{Math.round(totals.igst_amount || 0)}</span>
+                <span>₹{Number(totals.igst_amount || 0).toFixed(2)}</span>
               </div>
             )}
             <div className={styles.summaryLine}>
               <span>Total Tax:</span>
-              <span>₹{Math.round(totals.total_tax || returnData.total_tax || 0)}</span>
+              <span>₹{Number(totals.total_tax || returnData.total_tax || 0).toFixed(2)}</span>
             </div>
             {totals.round_off !== undefined && (
               <div className={styles.summaryLine} style={{ color: '#555' }}>
                 <span>Round Off:</span>
-                <span>{totals.round_off >= 0 ? `+₹${totals.round_off}` : `-₹${Math.abs(totals.round_off)}`}</span>
+                <span>{totals.round_off >= 0 ? `+₹${Number(totals.round_off).toFixed(2)}` : `-₹${Math.abs(Number(totals.round_off)).toFixed(2)}`}</span>
               </div>
             )}
             <div className={styles.summaryTotalLine}>
               <span>Total Credit Allowed:</span>
-              <span>₹{grandTotal}</span>
+              <span>₹{grandTotal.toFixed(2)}</span>
             </div>
           </div>
         </div>

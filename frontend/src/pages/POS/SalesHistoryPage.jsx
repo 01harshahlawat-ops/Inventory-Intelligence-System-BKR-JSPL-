@@ -250,7 +250,7 @@ const SalesHistoryPage = () => {
         </>
       )
     },
-    { key: 'grand_total', label: 'Total (₹)', render: (val) => <span style={{fontWeight: '600'}}>₹{Math.round(val || 0)}</span> },
+    { key: 'grand_total', label: 'Total (₹)', render: (val) => <span style={{fontWeight: '600'}}>₹{Number(val || 0).toFixed(2)}</span> },
     {
       key: 'quantities',
       label: 'Sold/Ret/Net Qty',

@@ -122,22 +122,22 @@ export const SalesReturnReport = () => {
     {
       key: 'total_qty',
       label: 'Items (Qty)',
-      render: (val, row) => `${row.items_count || 1} items (${Math.round(val || 1)} units)`
+      render: (val, row) => `${row.items_count || 1} items (${val || 1} units)`
     },
     {
       key: 'total_taxable_amount',
       label: 'Taxable (₹)',
-      render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-'
+      render: (val) => val != null ? `₹${Number(val).toFixed(2)}` : '-'
     },
     {
       key: 'total_tax',
       label: 'GST (₹)',
-      render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-'
+      render: (val) => val != null ? `₹${Number(val).toFixed(2)}` : '-'
     },
     {
       key: 'grand_total',
       label: 'Grand Total (₹)',
-      render: (val) => <strong style={{ color: '#dc2626' }}>₹{Math.round(Number(val || 0))}</strong>
+      render: (val) => <strong style={{ color: '#dc2626' }}>₹{Number(val || 0).toFixed(2)}</strong>
     },
     {
       key: 'status',
@@ -225,19 +225,19 @@ export const SalesReturnReport = () => {
         <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>Taxable Value</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#475569', marginTop: '4px' }}>
-            ₹{Math.round(Number(summary.total_taxable || 0)).toLocaleString('en-IN')}
+            ₹{Number(summary.total_taxable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>GST Amount</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#d97706', marginTop: '4px' }}>
-            ₹{Math.round(Number(summary.total_tax || 0)).toLocaleString('en-IN')}
+            ₹{Number(summary.total_tax || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>Total Refund Amount</div>
           <div style={{ fontSize: '20px', fontWeight: 700, color: '#dc2626', marginTop: '4px' }}>
-            ₹{Math.round(Number(summary.grand_total || 0)).toLocaleString('en-IN')}
+            ₹{Number(summary.grand_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
       </div>
@@ -419,11 +419,11 @@ export const SalesReturnReport = () => {
                     <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
                       <td style={{ padding: '8px 10px', fontWeight: 600, color: '#0f172a' }}>{it.sku}</td>
                       <td style={{ padding: '8px 10px', color: '#334155' }}>{it.product_name}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{Math.round(it.quantity || 0)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>₹{Math.round(Number(it.unit_price || 0))}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{Math.round(it.tax_rate || 0)}%</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>{it.quantity}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>₹{Number(it.unit_price || 0).toFixed(2)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{it.tax_rate}%</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>
-                        ₹{Math.round(Number(it.total_price || 0))}
+                        ₹{Number(it.total_price || 0).toFixed(2)}
                       </td>
                       <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '12px' }}>{it.reason || 'Customer Return'}</td>
                     </tr>
@@ -449,7 +449,7 @@ export const SalesReturnReport = () => {
               backgroundColor: '#f8fafc'
             }}>
               <div style={{ fontSize: '13px', color: '#475569' }}>
-                Total Refund: <strong style={{ color: '#dc2626', fontSize: '15px' }}>₹{Math.round(Number(selectedReturn.grand_total || 0))}</strong>
+                Total Refund: <strong style={{ color: '#dc2626', fontSize: '15px' }}>₹{Number(selectedReturn.grand_total || 0).toFixed(2)}</strong>
               </div>
               <button
                 type="button"
