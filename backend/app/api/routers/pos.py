@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.exc import IntegrityError
 from uuid import uuid4
 
@@ -886,8 +886,23 @@ def get_sales_history(
         for item in response_items:
             item["linked_sales_return_ids"] = return_map.get(item["id"], [])
     
+    # Calculate summary metrics over the filtered set
+    summary_q = query.with_entities(
+        func.coalesce(func.sum(case((Sale.status != 'Cancelled', Sale.grand_total), else_=0)), 0).label("total_sales_amount"),
+        func.coalesce(func.sum(sold_subq.c.total_sold), 0).label("total_sold_units"),
+        func.coalesce(func.sum(returned_subq.c.total_returned), 0).label("total_returned_units")
+    ).order_by(None)
+    summary_res = summary_q.first()
+    summary = {
+        "total_sales_amount": int(round(float(summary_res.total_sales_amount or 0))),
+        "total_invoices_count": total,
+        "total_sold_units": int(summary_res.total_sold_units or 0),
+        "total_returned_units": int(summary_res.total_returned_units or 0)
+    }
+
     return {
         "total": total,
+        "summary": summary,
         "items": response_items
     }
 

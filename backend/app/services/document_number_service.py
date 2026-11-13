@@ -88,10 +88,44 @@ class DocumentNumberService:
         return max_num
 
     @staticmethod
+    def get_last_return_number(db: Session, company_id: int, prefix: str) -> tuple[int, int]:
+        """
+        Scan existing SalesReturns for this company and prefix, returning (max_numeric_val, digits_length).
+        Supports formats like:
+          - SR-001
+          - SR-15
+          - GGSR-001
+          - GGSR-241
+        """
+        from app.models.schema import SalesReturn
+        prefix_clean = prefix.strip().upper()
+        returns = db.query(SalesReturn.return_number).filter(
+            SalesReturn.company_id == company_id,
+            SalesReturn.status != "Cancelled"
+        ).all()
+
+        pattern = re.compile(rf'^{re.escape(prefix_clean)}[-/]?(\d+)$', re.IGNORECASE)
+
+        max_num = 0
+        found_len = 0
+        for (val,) in returns:
+            if not val:
+                continue
+            val = val.strip()
+            m = pattern.match(val)
+            if m:
+                num_str = m.group(1)
+                num = int(num_str)
+                if num > max_num:
+                    max_num = num
+                    found_len = len(num_str)
+        return max_num, found_len
+
+    @staticmethod
     def _format_sale_number(prefix: str, num: int, digits_len: int = 0) -> str:
         pref = prefix.strip().upper()
-        if pref in ['SERVICE', 'SERV', 'BKR', 'JSPL', 'GST', 'JGST']:
-            pad = 3
+        if pref in ['SERVICE', 'SERV', 'BKR', 'JSPL', 'GST', 'JGST', 'SR', 'GGSR']:
+            pad = max(3, digits_len)
             return f"{pref}-{num:0{pad}d}" if num < (10 ** pad) else f"{pref}-{num}"
         elif digits_len >= 3:
             return f"{pref}-{num:0{digits_len}d}" if num < (10 ** digits_len) else f"{pref}-{num}"
@@ -169,6 +203,24 @@ class DocumentNumberService:
                 "next_number": next_num,
                 "formatted_next_number": formatted
             }
+        elif document_type == DocumentTypeEnum.RETURN:
+            prefix = (prefix_override or "SR").strip().upper()
+            last_return_num, digits_len = DocumentNumberService.get_last_return_number(db, company_id, prefix)
+            seq = db.query(DocumentSequence).filter(
+                DocumentSequence.company_id == company_id,
+                DocumentSequence.document_type == document_type,
+                DocumentSequence.fiscal_year == fiscal_year,
+                DocumentSequence.prefix == prefix
+            ).first()
+            current_max = max(seq.last_number if seq else 0, last_return_num)
+            next_num = current_max + 1
+            formatted = DocumentNumberService._format_sale_number(prefix, next_num, max(3, digits_len))
+            return {
+                "prefix": prefix,
+                "last_number": current_max,
+                "next_number": next_num,
+                "formatted_next_number": formatted
+            }
         else:
             seq = db.query(DocumentSequence).filter(
                 DocumentSequence.company_id == company_id,
@@ -233,7 +285,9 @@ class DocumentNumberService:
         if prefix_override:
             prefix = prefix_override.strip().upper()
         else:
-            if document_type != DocumentTypeEnum.SALE:
+            if document_type == DocumentTypeEnum.RETURN:
+                prefix = "SR"
+            elif document_type != DocumentTypeEnum.SALE:
                 prefix = f"{company_prefix}/{document_type.value}"
             else:
                 prefix = company_prefix
@@ -377,6 +431,58 @@ class DocumentNumberService:
                 next_num += 1
                 seq.last_number = next_num
                 candidate = f"{prefix}/{fiscal_year}/{next_num:05d}"
+                db.flush()
+
+            return candidate
+
+        # Handling for RETURN: always base on MAX(existing returns, seq.last_number) + 1
+        if document_type == DocumentTypeEnum.RETURN:
+            from app.models.schema import SalesReturn
+            prefix = (prefix_override or "SR").strip().upper()
+            last_return_num, digits_len = DocumentNumberService.get_last_return_number(db, company_id, prefix)
+
+            seq = db.query(DocumentSequence).filter(
+                DocumentSequence.company_id == company_id,
+                DocumentSequence.document_type == document_type,
+                DocumentSequence.fiscal_year == fiscal_year,
+                DocumentSequence.prefix == prefix
+            ).with_for_update().first()
+
+            if seq:
+                current_max = max(seq.last_number, last_return_num)
+                seq.last_number = current_max + 1
+                next_num = seq.last_number
+            else:
+                next_num = last_return_num + 1
+                seq = DocumentSequence(
+                    company_id=company_id,
+                    document_type=document_type,
+                    fiscal_year=fiscal_year,
+                    prefix=prefix,
+                    last_number=next_num
+                )
+                db.add(seq)
+                try:
+                    db.flush()
+                except IntegrityError:
+                    db.rollback()
+                    seq = db.query(DocumentSequence).filter(
+                        DocumentSequence.company_id == company_id,
+                        DocumentSequence.document_type == document_type,
+                        DocumentSequence.fiscal_year == fiscal_year,
+                        DocumentSequence.prefix == prefix
+                    ).with_for_update().first()
+                    current_max = max(seq.last_number, last_return_num)
+                    seq.last_number = current_max + 1
+                    next_num = seq.last_number
+
+            db.flush()
+            pad_len = max(3, digits_len)
+            candidate = DocumentNumberService._format_sale_number(prefix, next_num, pad_len)
+            while db.query(SalesReturn.id).filter(SalesReturn.return_number == candidate).first():
+                next_num += 1
+                seq.last_number = next_num
+                candidate = DocumentNumberService._format_sale_number(prefix, next_num, pad_len)
                 db.flush()
 
             return candidate

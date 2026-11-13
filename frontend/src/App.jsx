@@ -129,6 +129,7 @@ const App = () => {
 
                 {/* Phase 6 Routes */}
                 <Route path={ROUTES.SALES_RETURNS} element={<SalesReturnsPage />} />
+                <Route path="/sales-returns/:returnId" element={<SalesReturnsPage />} />
                 <Route path={ROUTES.DELIVERY_CHALLANS} element={<DeliveryChallansPage />} />
                 <Route path={ROUTES.DELIVERY_CHALLAN_CREATE} element={<CreateChallanPage />} />
                 

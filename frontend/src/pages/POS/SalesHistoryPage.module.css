@@ -5,7 +5,65 @@
 }
 
 .header {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
   margin-bottom: 24px;
+}
+
+.kpiCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpiCardSales {
+  border-left: 4px solid #16a34a;
+}
+
+.kpiCardInvoices {
+  border-left: 4px solid #2563eb;
+}
+
+.kpiCardSold {
+  border-left: 4px solid #0891b2;
+}
+
+.kpiCardReturned {
+  border-left: 4px solid #ea580c;
+}
+
+.kpiLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kpiValue {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.kpiSub {
+  font-size: 11px;
+  color: #94a3b8;
 }
 
 .header h1 {

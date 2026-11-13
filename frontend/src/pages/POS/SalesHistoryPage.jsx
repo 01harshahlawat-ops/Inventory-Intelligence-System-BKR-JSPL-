@@ -8,11 +8,14 @@ import { DataTable, TableHeader, TableRow, TablePagination } from '../../compone
 import Button from '../../components/forms/Button';
 import styles from './SalesHistoryPage.module.css';
 import { formatDate } from '../../utils/dateUtils';
+import useCompanyStore from '../../stores/useCompanyStore';
 import { FiEye, FiRefreshCw, FiCheck, FiX, FiClock, FiEdit, FiXCircle, FiDownload, FiUpload } from 'react-icons/fi';
 
 const SalesHistoryPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const currentCompany = useCompanyStore(state => state.currentCompany);
+  const companyCode = currentCompany?.code || 'BKR';
   
   // Filters
   const [search, setSearch] = useState('');
@@ -34,9 +37,10 @@ const SalesHistoryPage = () => {
   const fileInputRef = React.useRef(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sales', skip, limit, search, status, invoiceType, returnStatus, tallyStatus, startDate, endDate],
+    queryKey: ['sales', currentCompany?.id, skip, limit, search, status, invoiceType, returnStatus, tallyStatus, startDate, endDate],
     queryFn: () => posService.getSalesHistory({
       skip, limit,
+      company_id: currentCompany?.id,
       search: search || undefined,
       status: status || undefined,
       invoice_type: invoiceType || undefined,
@@ -49,6 +53,12 @@ const SalesHistoryPage = () => {
 
   const sales = data?.items || [];
   const total = data?.total || 0;
+  const summary = data?.summary || {
+    total_sales_amount: 0,
+    total_invoices_count: 0,
+    total_sold_units: 0,
+    total_returned_units: 0
+  };
 
   const retryTallyMutation = useMutation({
     mutationFn: posService.retryTallySync,
@@ -333,7 +343,47 @@ const SalesHistoryPage = () => {
   return (
     <div className={styles.historyContainer}>
       <div className={styles.header}>
-        <h1>Sales History</h1>
+        <div>
+          <h1 style={{ margin: 0 }}>Sales History</h1>
+          <span style={{ fontSize: '13px', color: '#64748b' }}>
+            Company: <strong>{companyCode}</strong> ({currentCompany?.name || companyCode})
+          </span>
+        </div>
+      </div>
+
+      {/* KPI Cards: Total Sale View in Round Off */}
+      <div className={styles.kpiGrid}>
+        <div className={`${styles.kpiCard} ${styles.kpiCardSales}`}>
+          <span className={styles.kpiLabel}>Total Sales ({companyCode})</span>
+          <span className={styles.kpiValue}>
+            ₹{Math.round(summary.total_sales_amount || 0).toLocaleString('en-IN')}
+          </span>
+          <span className={styles.kpiSub}>Total Non-Cancelled Sales (Round Off)</span>
+        </div>
+
+        <div className={`${styles.kpiCard} ${styles.kpiCardInvoices}`}>
+          <span className={styles.kpiLabel}>Total Invoices</span>
+          <span className={styles.kpiValue}>
+            {summary.total_invoices_count || total}
+          </span>
+          <span className={styles.kpiSub}>Matching Current Filters</span>
+        </div>
+
+        <div className={`${styles.kpiCard} ${styles.kpiCardSold}`}>
+          <span className={styles.kpiLabel}>Units Sold</span>
+          <span className={styles.kpiValue}>
+            {summary.total_sold_units || 0}
+          </span>
+          <span className={styles.kpiSub}>Gross Items Sold</span>
+        </div>
+
+        <div className={`${styles.kpiCard} ${styles.kpiCardReturned}`}>
+          <span className={styles.kpiLabel}>Units Returned</span>
+          <span className={styles.kpiValue} style={{ color: summary.total_returned_units > 0 ? '#c2410c' : 'inherit' }}>
+            {summary.total_returned_units || 0}
+          </span>
+          <span className={styles.kpiSub}>Customer Sales Returns</span>
+        </div>
       </div>
 
       <div className={styles.filtersWrapper}>
