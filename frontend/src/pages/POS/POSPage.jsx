@@ -1283,7 +1283,7 @@ const POSPage = () => {
                         </div>
                       </div>
                       <div className={styles.searchItemRight}>
-                        <span className={styles.searchItemPrice}>₹{Math.round(result.item_rate || result.selling_price || 0).toLocaleString('en-IN')}</span>
+                        <span className={styles.searchItemPrice}>₹{Number(result.item_rate || result.selling_price || 0).toFixed(2)}</span>
                         <span className={`${styles.searchStockBadge} ${result.available_stock < 5 ? styles.low : ''}`}>
                           {result.available_stock > 0 ? `✓ Stock: ${result.available_stock}` : 'Out of Stock'}
                         </span>
@@ -1390,9 +1390,9 @@ const POSPage = () => {
                             step="0.1"
                           />
                         </td>
-                        <td className={styles.amountCell}>₹{Math.round(item.taxable_amount || 0).toLocaleString('en-IN')}</td>
-                        <td className={styles.amountCell}>₹{Math.round(totalTax).toLocaleString('en-IN')}</td>
-                        <td className={styles.totalCell}>₹{Math.round(item.line_total || 0).toLocaleString('en-IN')}</td>
+                        <td className={styles.amountCell}>₹{(item.taxable_amount || 0).toFixed(2)}</td>
+                        <td className={styles.amountCell}>₹{(totalTax).toFixed(2)}</td>
+                        <td className={styles.totalCell}>₹{(item.line_total || 0).toFixed(2)}</td>
                         <td>
                           <button className={styles.removeBtn} onClick={() => removeFromCart(index)} title="Remove Item">
                             <FiTrash2 size={15} />
@@ -1432,30 +1432,30 @@ const POSPage = () => {
 
           <div className={styles.summaryRow}>
             <span>Taxable Amount</span>
-            <span>₹{Math.round(totals.taxable).toLocaleString('en-IN')}</span>
+            <span>₹{totals.taxable.toFixed(2)}</span>
           </div>
 
           {isInterState ? (
             <div className={styles.summaryRow}>
               <span>IGST</span>
-              <span>₹{Math.round(totals.igst).toLocaleString('en-IN')}</span>
+              <span>₹{totals.igst.toFixed(2)}</span>
             </div>
           ) : (
             <>
               <div className={styles.summaryRow}>
                 <span>CGST</span>
-                <span>₹{Math.round(totals.cgst).toLocaleString('en-IN')}</span>
+                <span>₹{totals.cgst.toFixed(2)}</span>
               </div>
               <div className={styles.summaryRow}>
                 <span>SGST</span>
-                <span>₹{Math.round(totals.sgst).toLocaleString('en-IN')}</span>
+                <span>₹{totals.sgst.toFixed(2)}</span>
               </div>
             </>
           )}
 
           <div className={styles.summaryRow}>
             <span>Total Taxes</span>
-            <span>₹{Math.round(totals.tax).toLocaleString('en-IN')}</span>
+            <span>₹{totals.tax.toFixed(2)}</span>
           </div>
 
           {/* Grand Total Banner with whole rounded Rupees */}

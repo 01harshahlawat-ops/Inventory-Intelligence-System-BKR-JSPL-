@@ -33,7 +33,7 @@ export const FCReturnReport = () => {
   const columns = [
     { key: 'created_at', label: 'Date', render: (val) => formatDate(val) },
     { key: 'return_number', label: 'Return ID' },
-    { key: 'total_returned_qty', label: 'Total Quantity', render: (val) => Math.round(Number(val || 0)) },
+    { key: 'total_returned_qty', label: 'Total Quantity' },
     { key: 'status', label: 'Status' }
   ];
 

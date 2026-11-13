@@ -65,7 +65,7 @@ export default function ServiceBillRenderer({ service, company }) {
         <div style={{ width: '300px', borderTop: '2px solid black', paddingTop: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold' }}>
             <span>Total Amount:</span>
-            <span>₹{Math.round(service.total_amount || 0)}</span>
+            <span>₹{service.total_amount || 0}</span>
           </div>
         </div>
       </div>

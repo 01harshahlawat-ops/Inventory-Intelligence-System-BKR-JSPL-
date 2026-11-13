@@ -165,7 +165,7 @@ export const PurchaseReport = () => {
       label: 'Net Amount (₹)',
       render: (val) => (
         <strong style={{ color: '#059669', fontSize: '13px' }}>
-          ₹{Math.round(Number(val || 0)).toLocaleString('en-IN')}
+          ₹{Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </strong>
       )
     }
@@ -182,7 +182,7 @@ export const PurchaseReport = () => {
         <div style={{ padding: '14px 18px', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
           <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Total Purchases (₹)</div>
           <div style={{ fontSize: '22px', fontWeight: 700, color: '#059669', marginTop: '4px' }}>
-            ₹{Math.round(totalAmount).toLocaleString('en-IN')}
+            ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
       </div>

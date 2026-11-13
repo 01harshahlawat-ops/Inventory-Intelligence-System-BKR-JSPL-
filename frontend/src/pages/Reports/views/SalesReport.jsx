@@ -231,10 +231,10 @@ export const SalesReport = () => {
   const columns = [
     { key: 'period', label: 'Period / Date', render: (val) => formatDate(val, val || '-') },
     { key: 'total_orders', label: 'Total Orders' },
-    { key: 'total_items_sold', label: 'Items Sold', render: (val) => val != null ? Math.round(Number(val || 0)) : '-' },
-    { key: 'total_taxable_amount', label: 'Taxable Amount', render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-' },
-    { key: 'total_tax', label: 'Total GST', render: (val) => val != null ? `₹${Math.round(Number(val || 0))}` : '-' },
-    { key: 'total_revenue', label: 'Total Revenue', render: (val) => `₹${Math.round(Number(val || 0))}` }
+    { key: 'total_items_sold', label: 'Items Sold' },
+    { key: 'total_taxable_amount', label: 'Taxable Amount', render: (val) => val != null ? `₹${Number(val).toFixed(2)}` : '-' },
+    { key: 'total_tax', label: 'Total GST', render: (val) => val != null ? `₹${Number(val).toFixed(2)}` : '-' },
+    { key: 'total_revenue', label: 'Total Revenue', render: (val) => `₹${Number(val || 0).toFixed(2)}` }
   ];
 
   return (

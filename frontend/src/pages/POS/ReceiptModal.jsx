@@ -72,9 +72,9 @@ const ReceiptModal = ({ receipt, onClose, isPreview, onComplete, isPending }) =>
                     {item.hsn_sac && <div style={{fontSize: '10px', color: '#555'}}>HSN: {item.hsn_sac}</div>}
                     <div style={{fontSize: '10px', color: '#666'}}>GST: {item.gst_rate}%</div>
                   </td>
-                  <td>{Math.round(item.quantity || 0)}</td>
-                  <td>{Math.round(item.rate || 0)}</td>
-                  <td>{Math.round(item.line_total || 0)}</td>
+                  <td>{item.quantity}</td>
+                  <td>{(item.rate || 0).toFixed(2)}</td>
+                  <td>{(item.line_total || 0).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -84,15 +84,15 @@ const ReceiptModal = ({ receipt, onClose, isPreview, onComplete, isPending }) =>
 
           <div className={styles.row}>
             <span>Taxable Amount:</span>
-            <span>₹{Math.round(receipt.totals?.taxable_amount || 0)}</span>
+            <span>₹{(receipt.totals?.taxable_amount || 0).toFixed(2)}</span>
           </div>
           <div className={styles.row}>
             <span>Total Tax (GST):</span>
-            <span>₹{Math.round(receipt.totals?.total_tax || 0)}</span>
+            <span>₹{(receipt.totals?.total_tax || 0).toFixed(2)}</span>
           </div>
           <div className={`${styles.row} ${styles.bold}`} style={{fontSize: '18px', marginTop: '8px'}}>
             <span>Grand Total:</span>
-            <span>₹{Math.round(receipt.totals?.grand_total || 0)}</span>
+            <span>₹{(receipt.totals?.grand_total || 0).toFixed(2)}</span>
           </div>
 
           <div className={styles.divider}></div>

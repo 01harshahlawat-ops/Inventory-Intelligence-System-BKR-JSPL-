@@ -117,7 +117,7 @@ const ExportCenter = () => {
     }
   };
 
-  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Math.round(val || 0));
+  const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(val);
 
   const currentCatObj = CATEGORY_CONFIG.find(c => c.id === documentCategory);
 
