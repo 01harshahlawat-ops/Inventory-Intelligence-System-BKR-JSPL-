@@ -44,10 +44,13 @@ class SPAPIAmazonReturnsClient(AmazonReturnsClient):
             refresh_token=os.getenv("LWA_REFRESH_TOKEN") or os.getenv("SP_API_REFRESH_TOKEN"),
             lwa_app_id=os.getenv("LWA_CLIENT_ID") or os.getenv("SP_API_LWA_APP_ID"),
             lwa_client_secret=os.getenv("LWA_CLIENT_SECRET") or os.getenv("SP_API_LWA_CLIENT_SECRET"),
-            aws_secret_key=os.getenv("AWS_SECRET_KEY") or os.getenv("SP_API_AWS_SECRET_KEY"),
-            aws_access_key=os.getenv("AWS_ACCESS_KEY") or os.getenv("SP_API_AWS_ACCESS_KEY"),
-            role_arn=os.getenv("AWS_IAM_ROLE_ARN") or os.getenv("SP_API_ROLE_ARN"),
         )
+        if os.getenv("SP_API_USE_IAM", "false").lower() == "true":
+            self.credentials.update(
+                aws_secret_key=os.getenv("AWS_SECRET_KEY") or os.getenv("SP_API_AWS_SECRET_KEY"),
+                aws_access_key=os.getenv("AWS_ACCESS_KEY") or os.getenv("SP_API_AWS_ACCESS_KEY"),
+                role_arn=os.getenv("AWS_IAM_ROLE_ARN") or os.getenv("SP_API_ROLE_ARN"),
+            )
         self.marketplace_str = os.getenv("MARKETPLACE_ID", "IN")
 
     def fetch_returns(self, since: datetime = None) -> List[Dict[str, Any]]:

@@ -124,3 +124,6 @@ export function amountInWords(num) {
 export function taxAmountInWords(num) {
   return amountInWords(num);
 }
+
+export default amountInWords;
+
