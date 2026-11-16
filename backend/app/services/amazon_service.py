@@ -95,6 +95,10 @@ class AmazonService:
             if force_backfill:
                 since = datetime(2026, 8, 1)
             else:
+                latest_alloc_date = db.query(func.max(AmazonLiveAllocation.order_date)).filter(
+                    AmazonLiveAllocation.company_id == company_id
+                ).scalar()
+
                 last_log = db.query(AmazonSyncLog).filter(
                     AmazonSyncLog.company_id == company_id,
                     AmazonSyncLog.status == "SUCCESS"
@@ -108,15 +112,21 @@ class AmazonService:
                         pass
 
                 if watermark:
-                    since = watermark - timedelta(hours=2)
-                else:
-                    latest_alloc = db.query(func.max(AmazonLiveAllocation.updated_at)).filter(
-                        AmazonLiveAllocation.company_id == company_id
-                    ).scalar()
-                    if latest_alloc:
-                        since = latest_alloc - timedelta(hours=2)
+                    # Guard against stale/empty watermark jumps:
+                    # If watermark is ahead of our latest database order by more than 24h,
+                    # fall back to latest order date to prevent permanently skipping orders.
+                    if latest_alloc_date and (watermark - latest_alloc_date).total_seconds() > 86400:
+                        logger.warning(
+                            f"Watermark ({watermark}) is more than 24h ahead of latest allocation ({latest_alloc_date}). "
+                            f"Falling back to latest order date to backfill gap."
+                        )
+                        since = latest_alloc_date - timedelta(hours=2)
                     else:
-                        since = datetime(2026, 8, 1)
+                        since = watermark - timedelta(hours=2)
+                elif latest_alloc_date:
+                    since = latest_alloc_date - timedelta(hours=2)
+                else:
+                    since = datetime(2026, 8, 1)
 
         sync_log = AmazonSyncLog(
             company_id=company_id,
@@ -416,7 +426,17 @@ class AmazonService:
             sync_log.orders_processed = counters["processed"]
             sync_log.skipped_duplicates = counters["skipped"]
             sync_log.failed_items = counters["failed"]
-            watermark_ts = end_time if not max_pages else counters.get("max_order_date", end_time)
+            if counters["processed"] > 0 and counters.get("max_order_date"):
+                watermark_ts = counters["max_order_date"]
+            elif counters["processed"] == 0:
+                # If 0 orders were processed, only advance to end_time if since was within the last 2 hours.
+                # Never leap forward over an un-synced gap when 0 orders were fetched.
+                if (datetime.utcnow() - since).total_seconds() <= 7200:
+                    watermark_ts = end_time
+                else:
+                    watermark_ts = since
+            else:
+                watermark_ts = counters.get("max_order_date", end_time if not max_pages else since)
             sync_log.api_response_status = f"watermark:{watermark_ts.isoformat()}"
             db.commit()
 

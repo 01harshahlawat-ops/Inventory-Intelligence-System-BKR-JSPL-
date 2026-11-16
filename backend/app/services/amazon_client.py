@@ -41,10 +41,13 @@ class SPAPIAmazonClient(AmazonClient):
             refresh_token=os.getenv("LWA_REFRESH_TOKEN"),
             lwa_app_id=os.getenv("LWA_CLIENT_ID"),
             lwa_client_secret=os.getenv("LWA_CLIENT_SECRET"),
-            aws_secret_key=os.getenv("AWS_SECRET_KEY"),
-            aws_access_key=os.getenv("AWS_ACCESS_KEY"),
-            role_arn=os.getenv("AWS_IAM_ROLE_ARN"),
         )
+        if os.getenv("SP_API_USE_IAM", "false").lower() == "true":
+            self.credentials.update(
+                aws_secret_key=os.getenv("AWS_SECRET_KEY"),
+                aws_access_key=os.getenv("AWS_ACCESS_KEY"),
+                role_arn=os.getenv("AWS_IAM_ROLE_ARN"),
+            )
         self.marketplace = os.getenv("MARKETPLACE_ID", "IN")
         
     def fetch_orders(
@@ -124,9 +127,9 @@ class SPAPIAmazonClient(AmazonClient):
 
                     # Performance optimization: if order already exists in our DB, we already have its items!
                     parsed_items = []
-                    if order_id not in existing_ids:
-                        # Fetch order items for new orders with rate limiting matching Amazon's 0.5 req/sec quota
-                        time.sleep(2.0)
+                    if order_id not in existing_ids and status != "Canceled":
+                        # Fetch order items for new orders with rate limiting matching Amazon quota
+                        time.sleep(1.0)
                         try:
                             items_res = fetch_with_backoff(orders_api.get_order_items, order_id)
                             items_data = (items_res.payload or {}).get("OrderItems", []) if items_res else []
