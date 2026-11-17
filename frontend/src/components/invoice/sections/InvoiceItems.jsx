@@ -80,7 +80,7 @@ const InvoiceItems = ({ items = [], isInterState = false }) => {
                   })()}
                 </td>
                 <td className={styles.tdLeft}>{item.pack_grade || (item.sku === 'SERVICE CHARGE' || item.hsn_sac === '9987' ? 'SERV' : '')}</td>
-                <td className={styles.tdCenter}>{item.hsn_sac || item.hsn || ''}</td>
+                <td className={`${styles.tdCenter} ${styles.tdHSN}`}>{item.hsn_sac || item.hsn || ''}</td>
                 <td className={styles.tdQty}>{qty.toFixed(2)}</td>
                 <td className={styles.tdRate}>{formatNum(rate)}</td>
                 <td className={styles.tdRight}>{cdDisplay}</td>

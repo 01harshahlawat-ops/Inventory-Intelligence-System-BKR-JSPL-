@@ -1,7 +1,7 @@
 import React, { forwardRef } from 'react';
 import styles from './CreditNoteRenderer.module.css';
 import { formatDate } from '../../utils/dateUtils';
-import amountInWords from '../../utils/amountInWords';
+import { amountInWords } from '../../utils/amountInWords';
 import { FiPrinter, FiX } from 'react-icons/fi';
 
 const CreditNoteRenderer = forwardRef(({ returnData, onClose }, ref) => {

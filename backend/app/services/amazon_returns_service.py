@@ -41,18 +41,22 @@ class AmazonReturnsService:
         records_updated = 0
         failed_records = []
         
-        for return_data in returns_data:
+        valid_items = [r for r in returns_data if r.get("amazon_return_id") and r.get("order_item_id")]
+        ret_ids = list({r["amazon_return_id"] for r in valid_items})
+        
+        existing_map = {}
+        if ret_ids:
+            existing_records = db.query(AmazonReturn).filter(
+                AmazonReturn.company_id == company_id,
+                AmazonReturn.amazon_return_id.in_(ret_ids)
+            ).all()
+            existing_map = {(er.amazon_return_id, er.order_item_id): er for er in existing_records}
+
+        for return_data in valid_items:
             amazon_return_id = return_data.get("amazon_return_id")
             order_item_id = return_data.get("order_item_id")
-            if not amazon_return_id or not order_item_id:
-                continue
             
-            # Idempotency check: Look for existing return by company_id + return_id + item_id
-            existing_return = db.query(AmazonReturn).filter(
-                AmazonReturn.company_id == company_id,
-                AmazonReturn.amazon_return_id == amazon_return_id,
-                AmazonReturn.order_item_id == order_item_id
-            ).first()
+            existing_return = existing_map.get((amazon_return_id, order_item_id))
             
             requested_str = return_data.get("requested_at")
             received_str = return_data.get("received_at")
@@ -61,44 +65,41 @@ class AmazonReturnsService:
             received_dt = safe_parse_dt(received_str)
             
             try:
-                with db.begin_nested():
-                    if existing_return:
-                        # Update status and timestamps if changed
-                        updated = False
-                        if return_data.get("return_status") and return_data.get("return_status") != existing_return.return_status:
-                            existing_return.return_status = return_data.get("return_status")
-                            updated = True
-                        if received_dt and existing_return.received_at != received_dt:
-                            existing_return.received_at = received_dt
-                            updated = True
-                            
-                        if updated:
-                            existing_return.last_synced_at = datetime.utcnow()
-                            db.flush()
-                            records_updated += 1
-                    else:
-                        # Create new unverified return (inspection_status=None)
-                        new_return = AmazonReturn(
-                            company_id=company_id,
-                            amazon_return_id=amazon_return_id,
-                            amazon_order_id=return_data.get("amazon_order_id"),
-                            order_item_id=order_item_id,
-                            sku=return_data.get("sku"),
-                            asin=return_data.get("asin"),
-                            product_name=return_data.get("product_name"),
-                            quantity=return_data.get("quantity") or 1,
-                            return_reason=return_data.get("return_reason"),
-                            return_status=return_data.get("return_status") or "Received",
-                            inspection_status=None,  # Must be explicitly verified before restock
-                            requested_at=requested_dt,
-                            received_at=received_dt,
-                            last_synced_at=datetime.utcnow()
-                        )
-                        db.add(new_return)
-                        db.flush()
-                        records_created += 1
+                if existing_return:
+                    # Update status and timestamps if changed
+                    updated = False
+                    if return_data.get("return_status") and return_data.get("return_status") != existing_return.return_status:
+                        existing_return.return_status = return_data.get("return_status")
+                        updated = True
+                    if received_dt and existing_return.received_at != received_dt:
+                        existing_return.received_at = received_dt
+                        updated = True
+                        
+                    if updated:
+                        existing_return.last_synced_at = datetime.utcnow()
+                        records_updated += 1
+                else:
+                    # Create new unverified return (inspection_status=None)
+                    new_return = AmazonReturn(
+                        company_id=company_id,
+                        amazon_return_id=amazon_return_id,
+                        amazon_order_id=return_data.get("amazon_order_id"),
+                        order_item_id=order_item_id,
+                        sku=return_data.get("sku"),
+                        asin=return_data.get("asin"),
+                        product_name=return_data.get("product_name"),
+                        quantity=return_data.get("quantity") or 1,
+                        return_reason=return_data.get("return_reason"),
+                        return_status=return_data.get("return_status") or "Received",
+                        inspection_status=None,  # Must be explicitly verified before restock
+                        requested_at=requested_dt,
+                        received_at=received_dt,
+                        last_synced_at=datetime.utcnow()
+                    )
+                    db.add(new_return)
+                    existing_map[(amazon_return_id, order_item_id)] = new_return
+                    records_created += 1
             except Exception as e:
-                # db.rollback() happens automatically because of begin_nested() context manager
                 logger.error(
                     f"Amazon return failed for record_id={amazon_return_id}",
                     exc_info=True
@@ -108,6 +109,9 @@ class AmazonReturnsService:
                     "error": str(e)
                 })
                 continue
+
+        if records_created > 0 or records_updated > 0:
+            db.commit()
 
         if failed_records:
             raise Exception(f"PartialBatchFailureException: {failed_records}")
@@ -129,7 +133,6 @@ class AmazonReturnsService:
         into amazon_returns table so warehouse staff can verify, inspect, and restock them.
         """
         from app.models.schema import AmazonLiveAllocation, AllocationStatus, AmazonNetworkType, Product
-        from sqlalchemy import or_
 
         alloc_returns = (
             db.query(AmazonLiveAllocation)
@@ -139,6 +142,25 @@ class AmazonReturnsService:
             )
             .all()
         )
+
+        if not alloc_returns:
+            return 0, 0
+
+        # Prefetch existing return keys to avoid N+1 queries over remote connection
+        existing_keys = {
+            (r[0], r[1])
+            for r in db.query(AmazonReturn.amazon_return_id, AmazonReturn.order_item_id)
+            .filter(AmazonReturn.company_id == company_id)
+            .all()
+        }
+
+        # Prefetch product SKU to name map
+        prod_map = {
+            p[0]: p[1]
+            for p in db.query(Product.sku, Product.name)
+            .filter(Product.company_id == company_id)
+            .all()
+        }
 
         created = 0
         updated = 0
@@ -153,38 +175,30 @@ class AmazonReturnsService:
             ret_id = f"{channel}-{a.invoice_number or a.order_id}"
             item_id = a.amazon_line_item_id or f"{a.order_id}-{a.sku}"
 
-            existing = db.query(AmazonReturn).filter(
-                AmazonReturn.company_id == company_id,
-                AmazonReturn.amazon_return_id == ret_id,
-                AmazonReturn.order_item_id == item_id
-            ).first()
+            if (ret_id, item_id) in existing_keys:
+                continue
 
-            prod = db.query(Product).filter(
-                Product.sku == a.sku,
-                Product.company_id == company_id
-            ).first()
+            existing_keys.add((ret_id, item_id))
+            prod_name = prod_map.get(a.sku) or a.sku
 
-            if existing:
-                pass
-            else:
-                new_ret = AmazonReturn(
-                    company_id=company_id,
-                    amazon_return_id=ret_id,
-                    amazon_order_id=a.order_id,
-                    order_item_id=item_id,
-                    sku=a.sku,
-                    asin=None,
-                    product_name=prod.name if prod else a.sku,
-                    quantity=abs(a.allocated_qty or 1),
-                    return_reason=f"{channel} Customer Return ({a.invoice_number or 'Standard'})",
-                    return_status="Received",
-                    inspection_status=None,
-                    requested_at=a.order_date or a.shipment_date,
-                    received_at=a.shipment_date or a.order_date,
-                    last_synced_at=datetime.utcnow()
-                )
-                db.add(new_ret)
-                created += 1
+            new_ret = AmazonReturn(
+                company_id=company_id,
+                amazon_return_id=ret_id,
+                amazon_order_id=a.order_id,
+                order_item_id=item_id,
+                sku=a.sku,
+                asin=None,
+                product_name=prod_name,
+                quantity=abs(a.allocated_qty or 1),
+                return_reason=f"{channel} Customer Return ({a.invoice_number or 'Standard'})",
+                return_status="Received",
+                inspection_status=None,
+                requested_at=a.order_date or a.shipment_date,
+                received_at=a.shipment_date or a.order_date,
+                last_synced_at=datetime.utcnow()
+            )
+            db.add(new_ret)
+            created += 1
 
         if created > 0:
             db.commit()

@@ -401,7 +401,7 @@ def derive_gst_rate(
 def get_allocation_date_expr(db: Session, is_in_series: bool):
     """
     Return the effective date column expression for Amazon allocations.
-    For IN series (MFN), orders follow invoice_date unless a cross-month dispatch was delayed >= 6 days
+    For IN and VSHB series, orders follow invoice_date unless a cross-month dispatch was delayed >= 6 days
     into the following month (e.g., Sept invoice dispatched in Oct). Other warehouses keep shipment_date.
     """
     if not is_in_series:
@@ -881,7 +881,7 @@ class SeriesReportService:
         else:
             matched_wh = matched_warehouse_query.first()
 
-        is_in_series = series_clean == "IN" or (bool(matched_wh) and (matched_wh.code or "").strip().upper() == "IN")
+        is_in_series = series_clean in ("IN", "VSHB") or (bool(matched_wh) and (matched_wh.code or "").strip().upper() in ("IN", "VSHB"))
         is_amazon_target = series_clean in ("AMAZON", "AFN", "MFN", "IN") or bool(matched_wh)
         amazon_allocations = []
         if is_amazon_target:
@@ -2620,7 +2620,7 @@ class SeriesReportService:
             date_from = date(now_dt.year, now_dt.month, 1)
 
         wh_clean = (warehouse_code or "").strip().upper()
-        is_in_series = (wh_clean == "IN")
+        is_in_series = (wh_clean in ("IN", "VSHB"))
         alloc_date_col = get_allocation_date_expr(db, is_in_series)
 
         # Exclude zero-qty synthetic stubs while capturing Shipments, Refunds, and valid Cancellations
