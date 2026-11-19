@@ -200,6 +200,10 @@ def _orchestrate_daily_service_reminders():
 # ---------------------------------------------------------
 
 def start_scheduler() -> bool:
+    if os.getenv("ENABLE_SCHEDULER", "true").lower() not in ("true", "1", "yes"):
+        logger.info("Background scheduler disabled via ENABLE_SCHEDULER=false")
+        return False
+
     if scheduler.running:
         return True
 
@@ -231,8 +235,8 @@ def start_scheduler() -> bool:
         replace_existing=True
     )
     
-    # Amazon Polling (every X minutes)
-    poll_interval = int(os.getenv("AMAZON_POLL_INTERVAL_MINUTES", "15"))
+    # Amazon Polling (every X minutes, default 60 to prevent egress exhaustion)
+    poll_interval = int(os.getenv("AMAZON_POLL_INTERVAL_MINUTES", "60"))
     scheduler.add_job(
         _orchestrate_amazon_polling,
         IntervalTrigger(minutes=poll_interval),
