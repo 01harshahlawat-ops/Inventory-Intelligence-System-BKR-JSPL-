@@ -66,26 +66,30 @@ def _orchestrate_amazon_returns_sync():
     """
     db = SessionLocal()
     try:
-        # Find companies where amazon_returns_sync_enabled is True
-        settings = db.query(CompanySettings).filter(CompanySettings.amazon_returns_sync_enabled == True).all()
-        for setting in settings:
-            # Check if company is Active (handle ACTIVE or Active)
-            company = db.query(Company).filter(Company.id == setting.company_id, Company.status.in_(["ACTIVE", "Active"])).first()
-            if company:
-                logger.info(f"Triggering Amazon Returns Sync for company {company.code} (ID: {company.id})")
-                run_amazon_returns_sync_job(company_id=company.id)
+        # Join Company and CompanySettings to fetch enabled active companies in one query
+        companies = db.query(Company).join(
+            CompanySettings, Company.id == CompanySettings.company_id
+        ).filter(
+            CompanySettings.amazon_returns_sync_enabled == True,
+            Company.status.in_(["ACTIVE", "Active"])
+        ).all()
+
+        for company in companies:
+            logger.info(f"Triggering Amazon Returns Sync for company {company.code} (ID: {company.id})")
+            run_amazon_returns_sync_job(company_id=company.id)
     finally:
         db.close()
 
 def register_amazon_returns_jobs(scheduler):
     """
     Registers the Amazon Returns Sync orchestrator in the main APScheduler instance.
-    For simplicity, it polls every 5 minutes and checks which companies are enabled.
+    Configurable via AMAZON_RETURNS_POLL_INTERVAL_MINUTES, defaulting to 60 minutes.
     """
+    returns_interval = int(os.getenv("AMAZON_RETURNS_POLL_INTERVAL_MINUTES", "60"))
     scheduler.add_job(
         _orchestrate_amazon_returns_sync,
-        IntervalTrigger(minutes=5),
+        IntervalTrigger(minutes=returns_interval),
         id="amazon_returns_sync",
         replace_existing=True
     )
-    logger.info("Registered Amazon Returns Sync job (Interval: 5m)")
+    logger.info(f"Registered Amazon Returns Sync job (Interval: {returns_interval}m)")
