@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from uuid import uuid4
 
 from app.models.db import get_db
-from app.models.schema import Company, Product, Warehouse, WarehouseType, Inventory, Sale, SaleItem, CompanySettings, SalesReturn, SalesReturnItem, User, InventoryMovement
+from app.models.schema import Company, Product, Warehouse, WarehouseType, Inventory, Sale, SaleItem, CompanySettings, SalesReturn, SalesReturnItem, User, InventoryMovement, StockTransfer, StockTransferItem
 from app.api.dependencies import get_current_company_id, get_current_user
 from app.services.inventory_event_engine import InventoryEventEngine
 from app.services.invoice_number_service import InvoiceNumberService
@@ -94,6 +94,71 @@ def _generate_bill_number(company_code: str = "BKR") -> str:
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S%f")
     suffix = uuid4().hex[:6].upper()
     return f"{company_code}-{timestamp}-{suffix}"
+
+
+def _ensure_destination_product(
+    db: Session,
+    dest_company_id: int,
+    product: Optional[Product] = None,
+    sku: Optional[str] = None
+) -> Optional[Product]:
+    """Ensure a product exists in the destination company, auto-cloning metadata and initializing inventory if needed."""
+    target_sku = (product.sku if product else sku or "").strip().upper()
+    if not target_sku or not dest_company_id:
+        return None
+    dest_prod = db.query(Product).filter(
+        Product.sku == target_sku,
+        Product.company_id == dest_company_id
+    ).first()
+    if dest_prod:
+        return dest_prod
+
+    src_prod = product or db.query(Product).filter(Product.sku == target_sku).first()
+    if not src_prod:
+        return None
+
+    dest_prod = Product(
+        company_id=dest_company_id,
+        sku=src_prod.sku,
+        name=src_prod.name,
+        category=src_prod.category,
+        brand=src_prod.brand,
+        item_rate=src_prod.item_rate,
+        min_stock_level=src_prod.min_stock_level,
+        reorder_level=src_prod.reorder_level,
+        safety_stock=src_prod.safety_stock,
+        preferred_transfer_qty=src_prod.preferred_transfer_qty,
+        status=src_prod.status or "Active",
+        hsn=src_prod.hsn,
+        hsn_code=getattr(src_prod, 'hsn_code', None),
+        default_gst_rate=src_prod.default_gst_rate,
+        barcode=src_prod.barcode,
+        unit=src_prod.unit
+    )
+    db.add(dest_prod)
+    db.flush()
+
+    dest_warehouses = db.query(Warehouse).filter_by(company_id=dest_company_id, status="ACTIVE").all()
+    for dw in dest_warehouses:
+        inv = db.query(Inventory).filter_by(
+            company_id=dest_company_id,
+            warehouse_id=dw.id,
+            product_id=dest_prod.id
+        ).first()
+        if not inv:
+            inv = Inventory(
+                company_id=dest_company_id,
+                warehouse_id=dw.id,
+                product_id=dest_prod.id
+            )
+            inv._allow_mutation = True
+            inv.current_qty = 0
+            inv.available_qty = 0
+            inv.reserved_qty = 0
+            inv._allow_mutation = False
+            db.add(inv)
+    db.flush()
+    return dest_prod
 
 # --- Pydantic Models ---
 from pydantic import BaseModel, Field
@@ -1434,430 +1499,476 @@ def update_sale(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    from app.services.inventory_event_engine import InventoryEventEngine
-    
-    sale = db.query(Sale).filter(Sale.id == sale_id).first()
-    if not sale:
-        raise HTTPException(status_code=404, detail="Sale not found")
-        
-    if user.role.upper() not in ["ADMIN", "SUPER_ADMIN"]:
-        from app.models.schema import CompanyUser
-        access = db.query(CompanyUser).filter(
-            CompanyUser.user_id == user.id,
-            CompanyUser.company_id == sale.company_id
-        ).first()
-        if not access:
-            raise HTTPException(status_code=403, detail="Not authorized to edit this sale")
-        
-    if sale.status == 'Cancelled':
-        raise HTTPException(status_code=400, detail="Cannot edit a cancelled sale")
-        
-    # Validation: Ensure no returns exist
-    active_returns = db.query(SalesReturn).filter(SalesReturn.sale_id == sale.id, SalesReturn.status != 'Cancelled').all()
-    if active_returns:
-        raise HTTPException(status_code=400, detail="Cannot edit a sale that has active sales returns. Please cancel the returns first.")
+    try:
+        from app.services.inventory_event_engine import InventoryEventEngine
 
-    target_company_id = sale.company_id
+        sale = db.query(Sale).filter(Sale.id == sale_id).first()
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale not found")
 
-    # 1. Header Updates
-    if payload.custom_invoice_number and payload.custom_invoice_number.strip():
-        raw_no = payload.custom_invoice_number.strip()
-        prefix = (payload.invoice_prefix or "").strip().upper()
-        if prefix and not raw_no.upper().startswith(f"{prefix}-") and not raw_no.upper().startswith(f"{prefix}/"):
-            new_inv_no = f"{prefix}-{raw_no}"
-        else:
-            new_inv_no = raw_no
+        if user.role.upper() not in ["ADMIN", "SUPER_ADMIN"]:
+            from app.models.schema import CompanyUser
+            access = db.query(CompanyUser).filter(
+                CompanyUser.user_id == user.id,
+                CompanyUser.company_id == sale.company_id
+            ).first()
+            if not access:
+                raise HTTPException(status_code=403, detail="Not authorized to edit this sale")
 
-        if new_inv_no != sale.bill_number:
-            # Check for uniqueness
-            existing = db.query(Sale).filter(Sale.bill_number == new_inv_no, Sale.company_id == target_company_id).first()
-            if existing and existing.id != sale.id:
-                raise HTTPException(status_code=400, detail=f"Invoice number {new_inv_no} is already used.")
-            sale.bill_number = new_inv_no
-            sale.invoice_number = new_inv_no
+        if sale.status == 'Cancelled':
+            raise HTTPException(status_code=400, detail="Cannot edit a cancelled sale")
 
-    sale.customer_name = payload.customer_name
-    sale.customer_gstin = payload.customer_gstin
-    sale.customer_address = payload.customer_address
-    sale.customer_state = payload.customer_state
-    sale.customer_state_code = payload.customer_state_code
-    sale.customer_phone = payload.customer_phone
-    sale.customer_mobile = payload.customer_mobile
-    sale.customer_email = payload.customer_email
-    sale.place_of_supply = payload.place_of_supply
-    sale.shipping_name = payload.shipping_name
-    sale.shipping_address = payload.shipping_address
-    sale.shipping_state = payload.shipping_state
-    sale.shipping_state_code = payload.shipping_state_code
-    sale.shipping_gstin = payload.shipping_gstin
-    sale.invoice_type = payload.invoice_type
-    
-    if payload.custom_invoice_date:
-        sale.created_at = payload.custom_invoice_date
-        sale.sale_date = payload.custom_invoice_date
-        
-    sale.buyer_order_no = payload.buyer_order_no
-    sale.buyer_order_date = payload.buyer_order_date
-    sale.destination = payload.destination
-    sale.payment_terms = payload.payment_terms
-    sale.vehicle_number = payload.vehicle_number
-    sale.lr_rr_number = payload.lr_rr_number
-    sale.terms_of_delivery = payload.terms_of_delivery
-    sale.delivery_note = payload.delivery_note
-    sale.delivery_note_date = payload.delivery_note_date
-    sale.dispatch_document_number = payload.dispatch_document_number
-    sale.dispatch_through = payload.dispatch_through
-    
-    sale.total_taxable_amount = payload.total_taxable_amount
-    sale.total_tax = payload.total_tax
-    sale.grand_total = payload.grand_total
+        # Validation: Ensure no returns exist
+        active_returns = db.query(SalesReturn).filter(SalesReturn.sale_id == sale.id, SalesReturn.status != 'Cancelled').all()
+        if active_returns:
+            raise HTTPException(status_code=400, detail="Cannot edit a sale that has active sales returns. Please cancel the returns first.")
 
-    sale.payment_method = payload.payment_method
-    sale.payment_reference = payload.payment_reference
-    sale.payment_remarks = payload.payment_remarks
-    if payload.payment_date:
-        sale.payment_date = payload.payment_date
-    
-    # Reset Tally sync
-    if sale.tally_sync_status in ['COMPLETED', 'FAILED', 'PENDING']:
-        sale.tally_sync_status = 'PENDING'
-        
-    # 2. Resolve default warehouse for delta tracking
-    target_company = db.query(Company).filter(Company.id == target_company_id).first()
-    target_company_code = target_company.code if target_company else "CO"
+        target_company_id = sale.company_id
 
-    if payload.origin_warehouse_id:
-        default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(
-            Warehouse.id == payload.origin_warehouse_id,
-            Warehouse.company_id == target_company_id,
-            Warehouse.status == "ACTIVE"
-        ).first()
-    else:
-        sale_mov = db.query(InventoryMovement).filter(InventoryMovement.reference_id == sale.bill_number).first()
-        if sale_mov:
-            default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == sale_mov.warehouse_id).first()
-        else:
-            default_warehouse = _resolve_default_warehouse(db, target_company_id)
-        
-    if not default_warehouse:
-        default_warehouse = _resolve_default_warehouse(db, target_company_id)
-    if not default_warehouse:
-        raise HTTPException(status_code=400, detail="Warehouse not found for delta processing")
-
-    # Detect if billing warehouse has changed for this sale
-    all_sale_movs = db.query(InventoryMovement).filter(
-        (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number)
-    ).order_by(InventoryMovement.id.desc()).all()
-
-    sale_specific_movs = [
-        m for m in all_sale_movs
-        if (m.metadata_payload and str(m.metadata_payload.get("sale_id")) == str(sale.id))
-    ]
-    prior_movs = sale_specific_movs if sale_specific_movs else all_sale_movs
-    prior_wh_id = prior_movs[0].warehouse_id if prior_movs else None
-
-    warehouse_changed = (
-        prior_wh_id is not None
-        and default_warehouse is not None
-        and prior_wh_id != default_warehouse.id
-    )
-
-    # If warehouse changed, reverse previous inventory deductions from the old warehouse
-    if warehouse_changed and not payload.skip_inventory_update:
-        for old_it in sale.items:
-            product = db.query(Product).filter(Product.id == old_it.product_id).first()
-            if not product:
-                continue
-            is_service = (
-                (product.category in ['SERV', 'SERVICE'] or product.sku == 'SERVICE CHARGE' or product.hsn == '9987')
-                or old_it.sku == 'SERVICE CHARGE'
-                or old_it.hsn_sac == '9987'
-            )
-            if is_service:
-                continue
-            prior_wh = db.query(Warehouse).filter(Warehouse.id == prior_wh_id).first()
-            is_bkr_central_revert = (
-                target_company_code == "BKR" 
-                and prior_wh 
-                and (prior_wh.warehouse_type == WarehouseType.CENTRAL or (prior_wh.code or "").upper() == "BKR_CENTRAL")
-                and prior_wh_id in (39, 2)
-            )
-            wh_revert = 39 if is_bkr_central_revert else prior_wh_id
-            InventoryEventEngine.process_event(
-                db=db,
-                company_id=target_company_id,
-                product_sku=product.sku,
-                warehouse_id=wh_revert,
-                quantity=old_it.quantity,
-                event_type="ADD",
-                source="INVOICE_EDIT_WH_REVERSAL",
-                reference_id=sale.bill_number,
-                metadata_payload={
-                    "operation_id": f"REVERSAL_WH_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
-                    "sale_id": sale.id,
-                    "reverted_from_wh": prior_wh_id,
-                    "reverted_qty": old_it.quantity
-                },
-                allow_negative_stock=True
-            )
-
-    # Update seller snapshot if warehouse is specified
-    if default_warehouse:
-        wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == default_warehouse.id).first()
-        if wh:
-            if wh.warehouse_type != WarehouseType.CENTRAL:
-                if wh.hub:
-                    if wh.hub.gstin: sale.company_gstin_snapshot = wh.hub.gstin
-                    if wh.hub.state: sale.company_state_snapshot = wh.hub.state
-                    if wh.hub.state_code: sale.company_state_code_snapshot = wh.hub.state_code
-                    if wh.hub.address: sale.company_address_snapshot = wh.hub.address
-                    if wh.hub.phone: sale.company_phone_snapshot = wh.hub.phone
-                    if wh.hub.email: sale.company_email_snapshot = wh.hub.email
-            if wh.address and wh.address.strip():
-                sale.company_address_snapshot = wh.address.strip()
-            if wh.phone_number:
-                sale.company_phone_snapshot = wh.phone_number
-            if wh.email:
-                sale.company_email_snapshot = wh.email
-
-    # 2.5 Resolve linked transfer (for inter-company edits)
-    from app.models.schema import StockTransfer
-    linked_transfer = db.query(StockTransfer).filter(StockTransfer.invoice_id == sale.id).first()
-    dest_warehouse_id = None
-    dest_company_id = None
-    if linked_transfer:
-        dest_company_id = linked_transfer.to_company_id
-        if linked_transfer.destination_warehouse_id:
-            dw = db.query(Warehouse).filter(Warehouse.id == linked_transfer.destination_warehouse_id).first()
-        else:
-            dw = _resolve_default_warehouse(db, linked_transfer.to_company_id)
-        if dw:
-            dest_warehouse_id = dw.id
-
-    # 3. Item Delta Calculation
-    invoice_pref = (payload.invoice_prefix or "").strip().upper()
-    for it in (payload.items or []):
-        if it.sku == "SERVICE CHARGE" or it.hsn_sac == "9987":
-            if invoice_pref not in ["SERVICE", "SERV"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Service Charge can only be charged for Service series bills (SERVICE- or SERV-)."
-                )
-
-    old_items = {item.id: item for item in sale.items}
-    new_items_payload = payload.items or []
-    
-    # Process updates and additions
-    for req_item in new_items_payload:
-        product = None
-        if req_item.product_id:
-            product = db.query(Product).filter(Product.id == req_item.product_id).first()
-        if not product and req_item.sku:
-            product = db.query(Product).filter(Product.sku == req_item.sku).first()
-            
-        if not product:
-            continue
-            
-        existing_item = next((oi for oi in old_items.values() if oi.sku == (req_item.sku or product.sku)), None)
-        
-        delta_qty = req_item.quantity
-        if existing_item and not warehouse_changed:
-            delta_qty = req_item.quantity - existing_item.quantity
-            
-            # Update existing row
-            existing_item.product_id = product.id
-            existing_item.quantity = req_item.quantity
-            existing_item.selling_price = req_item.selling_price
-            existing_item.gst_rate = req_item.gst_rate
-            existing_item.taxable_amount = req_item.taxable_amount
-            existing_item.cgst = req_item.cgst
-            existing_item.sgst = req_item.sgst
-            existing_item.igst = req_item.igst
-            existing_item.line_total = req_item.line_total
-            existing_item.product_name = req_item.product_name or product.name
-            existing_item.hsn_sac = req_item.hsn_sac or product.hsn
-            existing_item.unit = req_item.unit or product.unit
-            existing_item.discount = req_item.discount or 0.0
-            
-            del old_items[existing_item.id] # mark as processed
-        else:
-            # Create new row
-            new_sale_item = SaleItem(
-                sale_id=sale.id,
-                product_id=product.id,
-                sku=product.sku,
-                quantity=req_item.quantity,
-                selling_price=req_item.selling_price,
-                gst_rate=req_item.gst_rate,
-                taxable_amount=req_item.taxable_amount,
-                cgst=req_item.cgst,
-                sgst=req_item.sgst,
-                igst=req_item.igst,
-                line_total=req_item.line_total,
-                product_name=req_item.product_name or product.name,
-                hsn_sac=req_item.hsn_sac or product.hsn,
-                unit=req_item.unit or product.unit,
-                discount=req_item.discount or 0.0
-            )
-            db.add(new_sale_item)
-            
-        # Apply Inventory Delta
-        is_service_item = (
-            (product and (product.category in ['SERV', 'SERVICE'] or product.sku == 'SERVICE CHARGE' or product.hsn == '9987'))
-            or req_item.sku == 'SERVICE CHARGE'
-            or req_item.hsn_sac == '9987'
-        )
-        if delta_qty != 0 and not payload.skip_inventory_update and not is_service_item:
-            wh_ids = [39, 2] if default_warehouse.id in (39, 2) else [default_warehouse.id]
-            if len(wh_ids) > 1 and delta_qty > 0:
-                central_inv = db.query(Inventory).filter(
-                    Inventory.product_id == product.id,
-                    Inventory.warehouse_id == 39,
-                    Inventory.company_id == target_company_id
-                ).first()
-                central_avail = max(0, central_inv.available_qty if central_inv else 0)
-                qty_from_39 = min(delta_qty, central_avail)
-                qty_from_2 = delta_qty - qty_from_39
-                if qty_from_39 > 0:
-                    InventoryEventEngine.process_event(
-                        db=db,
-                        company_id=target_company_id,
-                        product_sku=product.sku,
-                        warehouse_id=39,
-                        quantity=qty_from_39,
-                        event_type="SALE",
-                        source="OFFLINE_POS",
-                        reference_id=sale.bill_number,
-                        metadata_payload={
-                            "operation_id": f"EDIT_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
-                            "sale_id": sale.id, 
-                            "edit_delta": qty_from_39
-                        },
-                        allow_negative_stock=True
-                    )
-                if qty_from_2 > 0:
-                    InventoryEventEngine.process_event(
-                        db=db,
-                        company_id=target_company_id,
-                        product_sku=product.sku,
-                        warehouse_id=2,
-                        quantity=qty_from_2,
-                        event_type="SALE",
-                        source="OFFLINE_POS",
-                        reference_id=sale.bill_number,
-                        metadata_payload={
-                            "operation_id": f"EDIT_WH2_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
-                            "sale_id": sale.id, 
-                            "edit_delta": qty_from_2
-                        },
-                        allow_negative_stock=True
-                    )
+        # 1. Header Updates
+        if payload.custom_invoice_number and payload.custom_invoice_number.strip():
+            raw_no = payload.custom_invoice_number.strip()
+            prefix = (payload.invoice_prefix or "").strip().upper()
+            if prefix and not raw_no.upper().startswith(f"{prefix}-") and not raw_no.upper().startswith(f"{prefix}/"):
+                new_inv_no = f"{prefix}-{raw_no}"
             else:
-                event_type = "SALE" if delta_qty > 0 else "ADD"
-                source = "OFFLINE_POS" if delta_qty > 0 else "INVOICE_EDIT"
-                wh_target = 39 if default_warehouse.id in (39, 2) else default_warehouse.id
+                new_inv_no = raw_no
+
+            if new_inv_no != sale.bill_number:
+                # Check for uniqueness
+                existing = db.query(Sale).filter(Sale.bill_number == new_inv_no, Sale.company_id == target_company_id).first()
+                if existing and existing.id != sale.id:
+                    raise HTTPException(status_code=400, detail=f"Invoice number {new_inv_no} is already used.")
+                sale.bill_number = new_inv_no
+                sale.invoice_number = new_inv_no
+
+        sale.customer_name = payload.customer_name
+        sale.customer_gstin = payload.customer_gstin
+        sale.customer_address = payload.customer_address
+        sale.customer_state = payload.customer_state
+        sale.customer_state_code = payload.customer_state_code
+        sale.customer_phone = payload.customer_phone
+        sale.customer_mobile = payload.customer_mobile
+        sale.customer_email = payload.customer_email
+        sale.place_of_supply = payload.place_of_supply
+        sale.shipping_name = payload.shipping_name
+        sale.shipping_address = payload.shipping_address
+        sale.shipping_state = payload.shipping_state
+        sale.shipping_state_code = payload.shipping_state_code
+        sale.shipping_gstin = payload.shipping_gstin
+        sale.invoice_type = payload.invoice_type
+
+        if payload.custom_invoice_date:
+            sale.created_at = payload.custom_invoice_date
+            sale.sale_date = payload.custom_invoice_date
+
+        sale.buyer_order_no = payload.buyer_order_no
+        sale.buyer_order_date = payload.buyer_order_date
+        sale.destination = payload.destination
+        sale.payment_terms = payload.payment_terms
+        sale.vehicle_number = payload.vehicle_number
+        sale.lr_rr_number = payload.lr_rr_number
+        sale.terms_of_delivery = payload.terms_of_delivery
+        sale.delivery_note = payload.delivery_note
+        sale.delivery_note_date = payload.delivery_note_date
+        sale.dispatch_document_number = payload.dispatch_document_number
+        sale.dispatch_through = payload.dispatch_through
+
+        sale.total_taxable_amount = payload.total_taxable_amount
+        sale.total_tax = payload.total_tax
+        sale.grand_total = payload.grand_total
+
+        sale.payment_method = payload.payment_method
+        sale.payment_reference = payload.payment_reference
+        sale.payment_remarks = payload.payment_remarks
+        if payload.payment_date:
+            sale.payment_date = payload.payment_date
+
+        # Reset Tally sync
+        if sale.tally_sync_status in ['COMPLETED', 'FAILED', 'PENDING']:
+            sale.tally_sync_status = 'PENDING'
+
+        # 2. Resolve default warehouse for delta tracking
+        target_company = db.query(Company).filter(Company.id == target_company_id).first()
+        target_company_code = target_company.code if target_company else "CO"
+
+        if payload.origin_warehouse_id:
+            default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(
+                Warehouse.id == payload.origin_warehouse_id,
+                Warehouse.company_id == target_company_id,
+                Warehouse.status == "ACTIVE"
+            ).first()
+        else:
+            sale_mov = db.query(InventoryMovement).filter(InventoryMovement.reference_id == sale.bill_number).first()
+            if sale_mov:
+                default_warehouse = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == sale_mov.warehouse_id).first()
+            else:
+                default_warehouse = _resolve_default_warehouse(db, target_company_id)
+
+        if not default_warehouse:
+            default_warehouse = _resolve_default_warehouse(db, target_company_id)
+        if not default_warehouse:
+            raise HTTPException(status_code=400, detail="Warehouse not found for delta processing")
+
+        # Detect if billing warehouse has changed for this sale
+        all_sale_movs = db.query(InventoryMovement).filter(
+            (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number)
+        ).order_by(InventoryMovement.id.desc()).all()
+
+        sale_specific_movs = [
+            m for m in all_sale_movs
+            if (m.metadata_payload and str(m.metadata_payload.get("sale_id")) == str(sale.id))
+        ]
+        prior_movs = sale_specific_movs if sale_specific_movs else all_sale_movs
+        prior_wh_id = prior_movs[0].warehouse_id if prior_movs else None
+
+        warehouse_changed = (
+            prior_wh_id is not None
+            and default_warehouse is not None
+            and prior_wh_id != default_warehouse.id
+        )
+
+        # If warehouse changed, reverse previous inventory deductions from the old warehouse
+        if warehouse_changed and not payload.skip_inventory_update:
+            for old_it in sale.items:
+                product = db.query(Product).filter(Product.id == old_it.product_id).first()
+                if not product:
+                    continue
+                is_service = (
+                    (product.category in ['SERV', 'SERVICE'] or product.sku == 'SERVICE CHARGE' or product.hsn == '9987')
+                    or old_it.sku == 'SERVICE CHARGE'
+                    or old_it.hsn_sac == '9987'
+                )
+                if is_service:
+                    continue
+                prior_wh = db.query(Warehouse).filter(Warehouse.id == prior_wh_id).first()
+                is_bkr_central_revert = (
+                    target_company_code == "BKR" 
+                    and prior_wh 
+                    and (prior_wh.warehouse_type == WarehouseType.CENTRAL or (prior_wh.code or "").upper() == "BKR_CENTRAL")
+                    and prior_wh_id in (39, 2)
+                )
+                wh_revert = 39 if is_bkr_central_revert else prior_wh_id
                 InventoryEventEngine.process_event(
                     db=db,
                     company_id=target_company_id,
                     product_sku=product.sku,
-                    warehouse_id=wh_target,
-                    quantity=abs(delta_qty),
-                    event_type=event_type,
-                    source=source,
+                    warehouse_id=wh_revert,
+                    quantity=old_it.quantity,
+                    event_type="ADD",
+                    source="INVOICE_EDIT_WH_REVERSAL",
                     reference_id=sale.bill_number,
                     metadata_payload={
-                        "operation_id": f"EDIT_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
-                        "sale_id": sale.id, 
-                        "edit_delta": delta_qty
+                        "operation_id": f"REVERSAL_WH_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                        "sale_id": sale.id,
+                        "reverted_from_wh": prior_wh_id,
+                        "reverted_qty": old_it.quantity
                     },
                     allow_negative_stock=True
                 )
-            
-            if linked_transfer and dest_warehouse_id:
-                dest_event_type = "TRANSFER_IN" if delta_qty > 0 else "TRANSFER_OUT"
+
+        # Update seller snapshot if warehouse is specified
+        if default_warehouse:
+            wh = db.query(Warehouse).options(joinedload(Warehouse.hub)).filter(Warehouse.id == default_warehouse.id).first()
+            if wh:
+                if wh.warehouse_type != WarehouseType.CENTRAL:
+                    if wh.hub:
+                        if wh.hub.gstin: sale.company_gstin_snapshot = wh.hub.gstin
+                        if wh.hub.state: sale.company_state_snapshot = wh.hub.state
+                        if wh.hub.state_code: sale.company_state_code_snapshot = wh.hub.state_code
+                        if wh.hub.address: sale.company_address_snapshot = wh.hub.address
+                        if wh.hub.phone: sale.company_phone_snapshot = wh.hub.phone
+                        if wh.hub.email: sale.company_email_snapshot = wh.hub.email
+                if wh.address and wh.address.strip():
+                    sale.company_address_snapshot = wh.address.strip()
+                if wh.phone_number:
+                    sale.company_phone_snapshot = wh.phone_number
+                if wh.email:
+                    sale.company_email_snapshot = wh.email
+
+        # 2.5 Resolve linked transfer (for inter-company edits)
+        from app.models.schema import StockTransfer
+        linked_transfer = db.query(StockTransfer).filter(StockTransfer.invoice_id == sale.id).first()
+        dest_warehouse_id = None
+        dest_company_id = None
+        if linked_transfer:
+            dest_company_id = linked_transfer.to_company_id
+            if linked_transfer.destination_warehouse_id:
+                dw = db.query(Warehouse).filter(Warehouse.id == linked_transfer.destination_warehouse_id).first()
+            else:
+                dw = _resolve_default_warehouse(db, linked_transfer.to_company_id)
+            if dw:
+                dest_warehouse_id = dw.id
+
+        # 3. Item Delta Calculation
+        invoice_pref = (payload.invoice_prefix or "").strip().upper()
+        for it in (payload.items or []):
+            if it.sku == "SERVICE CHARGE" or it.hsn_sac == "9987":
+                if invoice_pref not in ["SERVICE", "SERV"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Service Charge can only be charged for Service series bills (SERVICE- or SERV-)."
+                    )
+
+        old_items = {item.id: item for item in sale.items}
+        new_items_payload = payload.items or []
+
+        # Process updates and additions
+        for req_item in new_items_payload:
+            product = None
+            if req_item.product_id:
+                product = db.query(Product).filter(Product.id == req_item.product_id).first()
+            if not product and req_item.sku:
+                product = db.query(Product).filter(Product.sku == req_item.sku).first()
+
+            if not product:
+                continue
+
+            existing_item = next((oi for oi in old_items.values() if oi.sku == (req_item.sku or product.sku)), None)
+
+            delta_qty = req_item.quantity
+            if existing_item and not warehouse_changed:
+                delta_qty = req_item.quantity - existing_item.quantity
+
+                # Update existing row
+                existing_item.product_id = product.id
+                existing_item.quantity = req_item.quantity
+                existing_item.selling_price = req_item.selling_price
+                existing_item.gst_rate = req_item.gst_rate
+                existing_item.taxable_amount = req_item.taxable_amount
+                existing_item.cgst = req_item.cgst
+                existing_item.sgst = req_item.sgst
+                existing_item.igst = req_item.igst
+                existing_item.line_total = req_item.line_total
+                existing_item.product_name = req_item.product_name or product.name
+                existing_item.hsn_sac = req_item.hsn_sac or product.hsn
+                existing_item.unit = req_item.unit or product.unit
+                existing_item.discount = req_item.discount or 0.0
+
+                del old_items[existing_item.id] # mark as processed
+            else:
+                # Create new row
+                new_sale_item = SaleItem(
+                    sale_id=sale.id,
+                    product_id=product.id,
+                    sku=product.sku,
+                    quantity=req_item.quantity,
+                    selling_price=req_item.selling_price,
+                    gst_rate=req_item.gst_rate,
+                    taxable_amount=req_item.taxable_amount,
+                    cgst=req_item.cgst,
+                    sgst=req_item.sgst,
+                    igst=req_item.igst,
+                    line_total=req_item.line_total,
+                    product_name=req_item.product_name or product.name,
+                    hsn_sac=req_item.hsn_sac or product.hsn,
+                    unit=req_item.unit or product.unit,
+                    discount=req_item.discount or 0.0
+                )
+                db.add(new_sale_item)
+
+            # Apply Inventory Delta
+            is_service_item = (
+                (product and (product.category in ['SERV', 'SERVICE'] or product.sku == 'SERVICE CHARGE' or product.hsn == '9987'))
+                or req_item.sku == 'SERVICE CHARGE'
+                or req_item.hsn_sac == '9987'
+            )
+            if delta_qty != 0 and not payload.skip_inventory_update and not is_service_item:
+                wh_ids = [39, 2] if default_warehouse.id in (39, 2) else [default_warehouse.id]
+                if len(wh_ids) > 1 and delta_qty > 0:
+                    central_inv = db.query(Inventory).filter(
+                        Inventory.product_id == product.id,
+                        Inventory.warehouse_id == 39,
+                        Inventory.company_id == target_company_id
+                    ).first()
+                    central_avail = max(0, central_inv.available_qty if central_inv else 0)
+                    qty_from_39 = min(delta_qty, central_avail)
+                    qty_from_2 = delta_qty - qty_from_39
+                    if qty_from_39 > 0:
+                        InventoryEventEngine.process_event(
+                            db=db,
+                            company_id=target_company_id,
+                            product_sku=product.sku,
+                            warehouse_id=39,
+                            quantity=qty_from_39,
+                            event_type="SALE",
+                            source="OFFLINE_POS",
+                            reference_id=sale.bill_number,
+                            metadata_payload={
+                                "operation_id": f"EDIT_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                                "sale_id": sale.id, 
+                                "edit_delta": qty_from_39
+                            },
+                            allow_negative_stock=True
+                        )
+                    if qty_from_2 > 0:
+                        InventoryEventEngine.process_event(
+                            db=db,
+                            company_id=target_company_id,
+                            product_sku=product.sku,
+                            warehouse_id=2,
+                            quantity=qty_from_2,
+                            event_type="SALE",
+                            source="OFFLINE_POS",
+                            reference_id=sale.bill_number,
+                            metadata_payload={
+                                "operation_id": f"EDIT_WH2_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                                "sale_id": sale.id, 
+                                "edit_delta": qty_from_2
+                            },
+                            allow_negative_stock=True
+                        )
+                else:
+                    event_type = "SALE" if delta_qty > 0 else "ADD"
+                    source = "OFFLINE_POS" if delta_qty > 0 else "INVOICE_EDIT"
+                    wh_target = 39 if default_warehouse.id in (39, 2) else default_warehouse.id
+                    InventoryEventEngine.process_event(
+                        db=db,
+                        company_id=target_company_id,
+                        product_sku=product.sku,
+                        warehouse_id=wh_target,
+                        quantity=abs(delta_qty),
+                        event_type=event_type,
+                        source=source,
+                        reference_id=sale.bill_number,
+                        metadata_payload={
+                            "operation_id": f"EDIT_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                            "sale_id": sale.id, 
+                            "edit_delta": delta_qty
+                        },
+                        allow_negative_stock=True
+                    )
+
+                if linked_transfer and dest_warehouse_id:
+                    _ensure_destination_product(db, dest_company_id, product=product)
+                    dest_event_type = "TRANSFER_IN" if delta_qty > 0 else "TRANSFER_OUT"
+                    InventoryEventEngine.process_event(
+                        db=db,
+                        company_id=dest_company_id,
+                        product_sku=product.sku,
+                        warehouse_id=dest_warehouse_id,
+                        quantity=abs(delta_qty),
+                        event_type=dest_event_type,
+                        source="INVOICE_EDIT",
+                        reference_id=sale.bill_number,
+                        metadata_payload={
+                            "operation_id": f"EDIT_TRF_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                            "sale_id": sale.id, 
+                            "edit_delta": delta_qty, 
+                            "linked_transfer": linked_transfer.id
+                        },
+                        allow_negative_stock=True
+                    )
+
+                if linked_transfer:
+                    dest_p = _ensure_destination_product(db, dest_company_id, product=product)
+                    target_pid = dest_p.id if dest_p else product.id
+                    st_item = next((ti for ti in linked_transfer.items if ti.product_id == target_pid), None)
+                    if not st_item:
+                        st_item = StockTransferItem(
+                            transfer_id=linked_transfer.id,
+                            product_id=target_pid,
+                            requested_qty=req_item.quantity,
+                            approved_qty=req_item.quantity,
+                            dispatched_qty=req_item.quantity,
+                            received_qty=req_item.quantity,
+                            unit_price=req_item.selling_price or product.item_rate or 0.0,
+                            total_value=req_item.line_total or 0.0
+                        )
+                        db.add(st_item)
+                    else:
+                        st_item.requested_qty = req_item.quantity
+                        st_item.approved_qty = req_item.quantity
+                        st_item.dispatched_qty = req_item.quantity
+                        st_item.received_qty = req_item.quantity
+                        st_item.unit_price = req_item.selling_price or product.item_rate or 0.0
+                        st_item.total_value = req_item.line_total or 0.0
+
+        # Process removals (anything left in old_items was deleted from the UI)
+        for oi in old_items.values():
+            is_oi_service = (
+                (oi.sku and oi.sku.strip().upper() == "SERVICE CHARGE")
+                or (oi.hsn_sac and oi.hsn_sac.strip() == "9987")
+            )
+            if not payload.skip_inventory_update and not is_oi_service and not warehouse_changed:
+                wh_target = 39 if default_warehouse.id in (39, 2) else default_warehouse.id
                 InventoryEventEngine.process_event(
                     db=db,
-                    company_id=dest_company_id,
-                    product_sku=product.sku,
-                    warehouse_id=dest_warehouse_id,
-                    quantity=abs(delta_qty),
-                    event_type=dest_event_type,
+                    company_id=target_company_id,
+                    product_sku=oi.sku,
+                    warehouse_id=wh_target,
+                    quantity=oi.quantity,
+                    event_type="ADD",
                     source="INVOICE_EDIT",
                     reference_id=sale.bill_number,
                     metadata_payload={
-                        "operation_id": f"EDIT_TRF_{sale.id}_{product.sku}_{uuid4().hex[:8]}",
+                        "operation_id": f"EDIT_DEL_{sale.id}_{oi.sku}_{uuid4().hex[:8]}",
                         "sale_id": sale.id, 
-                        "edit_delta": delta_qty, 
-                        "linked_transfer": linked_transfer.id
+                        "edit_delta": -oi.quantity
                     },
-                    allow_negative_stock=True
                 )
-            
-    # Process removals (anything left in old_items was deleted from the UI)
-    for oi in old_items.values():
-        is_oi_service = (
-            (oi.sku and oi.sku.strip().upper() == "SERVICE CHARGE")
-            or (oi.hsn_sac and oi.hsn_sac.strip() == "9987")
-        )
-        if not payload.skip_inventory_update and not is_oi_service and not warehouse_changed:
-            wh_target = 39 if default_warehouse.id in (39, 2) else default_warehouse.id
-            InventoryEventEngine.process_event(
-                db=db,
+
+                if linked_transfer and dest_warehouse_id:
+                    _ensure_destination_product(db, dest_company_id, sku=oi.sku)
+                    InventoryEventEngine.process_event(
+                        db=db,
+                        company_id=dest_company_id,
+                        product_sku=oi.sku,
+                        warehouse_id=dest_warehouse_id,
+                        quantity=oi.quantity,
+                        event_type="TRANSFER_OUT",
+                        source="INVOICE_EDIT",
+                        reference_id=sale.bill_number,
+                        metadata_payload={
+                            "operation_id": f"EDIT_TRF_DEL_{sale.id}_{oi.sku}_{uuid4().hex[:8]}",
+                            "sale_id": sale.id, 
+                            "edit_delta": -oi.quantity, 
+                            "linked_transfer": linked_transfer.id
+                        },
+                        allow_negative_stock=True
+                    )
+            if linked_transfer:
+                dest_p = db.query(Product).filter(Product.sku == oi.sku, Product.company_id == dest_company_id).first()
+                target_pid = dest_p.id if dest_p else oi.product_id
+                st_item = next((ti for ti in linked_transfer.items if ti.product_id in (target_pid, oi.product_id)), None)
+                if st_item:
+                    db.delete(st_item)
+            db.delete(oi)
+
+        if warehouse_changed:
+            # Update existing movement records to reflect the new warehouse
+            db.query(InventoryMovement).filter(
+                (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number),
+                InventoryMovement.source == "OFFLINE_POS"
+            ).update({"warehouse_id": default_warehouse.id}, synchronize_session=False)
+
+            AuditLogService.log(
+                db,
                 company_id=target_company_id,
-                product_sku=oi.sku,
-                warehouse_id=wh_target,
-                quantity=oi.quantity,
-                event_type="ADD",
-                source="INVOICE_EDIT",
-                reference_id=sale.bill_number,
-                metadata_payload={
-                    "operation_id": f"EDIT_DEL_{sale.id}_{oi.sku}_{uuid4().hex[:8]}",
-                    "sale_id": sale.id, 
-                    "edit_delta": -oi.quantity
-                },
+                entity_type="Sale",
+                entity_id=sale.id,
+                event_type="INVOICE_WAREHOUSE_CHANGED",
+                message=f"Invoice {sale.bill_number} billing warehouse changed from {prior_wh_id} to {default_warehouse.id} ({default_warehouse.name})",
+                metadata={
+                    "bill_number": sale.bill_number,
+                    "old_warehouse_id": prior_wh_id,
+                    "new_warehouse_id": default_warehouse.id,
+                    "user_id": user.id
+                }
             )
 
-            if linked_transfer and dest_warehouse_id:
-                InventoryEventEngine.process_event(
-                    db=db,
-                    company_id=dest_company_id,
-                    product_sku=oi.sku,
-                    warehouse_id=dest_warehouse_id,
-                    quantity=oi.quantity,
-                    event_type="TRANSFER_OUT",
-                    source="INVOICE_EDIT",
-                    reference_id=sale.bill_number,
-                    metadata_payload={
-                        "operation_id": f"EDIT_TRF_DEL_{sale.id}_{oi.sku}_{uuid4().hex[:8]}",
-                        "sale_id": sale.id, 
-                        "edit_delta": -oi.quantity, 
-                        "linked_transfer": linked_transfer.id
-                    },
-                    allow_negative_stock=True
-                )
-        db.delete(oi)
+        if linked_transfer:
+            linked_transfer.total_value = payload.grand_total or sale.grand_total
 
-    if warehouse_changed:
-        # Update existing movement records to reflect the new warehouse
-        db.query(InventoryMovement).filter(
-            (InventoryMovement.reference_id == sale.bill_number) | (InventoryMovement.reference_id == sale.invoice_number),
-            InventoryMovement.source == "OFFLINE_POS"
-        ).update({"warehouse_id": default_warehouse.id}, synchronize_session=False)
-
-        AuditLogService.log(
-            db,
-            company_id=target_company_id,
-            entity_type="Sale",
-            entity_id=sale.id,
-            event_type="INVOICE_WAREHOUSE_CHANGED",
-            message=f"Invoice {sale.bill_number} billing warehouse changed from {prior_wh_id} to {default_warehouse.id} ({default_warehouse.name})",
-            metadata={
-                "bill_number": sale.bill_number,
-                "old_warehouse_id": prior_wh_id,
-                "new_warehouse_id": default_warehouse.id,
-                "user_id": user.id
-            }
+        db.commit()
+        return {"message": "Invoice updated successfully"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Unexpected error in update_sale for sale {sale_id}: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to update invoice: {str(e)}"
         )
-
-    db.commit()
-    return {"message": "Invoice updated successfully"}

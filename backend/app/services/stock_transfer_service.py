@@ -32,9 +32,8 @@ class StockTransferService:
             
         unfulfilled_items = []
 
-        # ===== PRE-FLIGHT DESTINATION SKU VALIDATION =====
+        # ===== PRE-FLIGHT DESTINATION SKU VALIDATION & AUTO-CREATION =====
         if transfer.from_company_id != transfer.to_company_id:
-            missing_skus = []
             for item in transfer.items:
                 qty = fulfilled_qty_map.get(item.product_id, 0)
                 if qty <= 0: continue
@@ -42,10 +41,41 @@ class StockTransferService:
                 if product:
                     dest_product = db.query(Product).filter(Product.sku == product.sku, Product.company_id == transfer.to_company_id).first()
                     if not dest_product:
-                        missing_skus.append(product.sku)
-            if missing_skus:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=400, detail={"message": "Products missing in destination company", "missing_skus": missing_skus})
+                        dest_product = Product(
+                            company_id=transfer.to_company_id,
+                            sku=product.sku,
+                            name=product.name,
+                            category=product.category,
+                            brand=product.brand,
+                            item_rate=product.item_rate,
+                            min_stock_level=product.min_stock_level,
+                            reorder_level=product.reorder_level,
+                            safety_stock=product.safety_stock,
+                            preferred_transfer_qty=product.preferred_transfer_qty,
+                            status=product.status or "Active",
+                            hsn=product.hsn,
+                            hsn_code=getattr(product, 'hsn_code', None),
+                            default_gst_rate=product.default_gst_rate,
+                            barcode=product.barcode,
+                            unit=product.unit
+                        )
+                        db.add(dest_product)
+                        db.flush()
+
+                        dest_warehouses = db.query(Warehouse).filter_by(company_id=transfer.to_company_id, status="ACTIVE").all()
+                        for dw in dest_warehouses:
+                            inv = Inventory(
+                                company_id=transfer.to_company_id,
+                                warehouse_id=dw.id,
+                                product_id=dest_product.id
+                            )
+                            inv._allow_mutation = True
+                            inv.current_qty = 0
+                            inv.available_qty = 0
+                            inv.reserved_qty = 0
+                            inv._allow_mutation = False
+                            db.add(inv)
+                        db.flush()
 
         for item in transfer.items:
             qty = fulfilled_qty_map.get(item.product_id, 0)
