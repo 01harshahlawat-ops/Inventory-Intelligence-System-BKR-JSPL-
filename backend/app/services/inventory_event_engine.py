@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.exc import OperationalError
 from fastapi import HTTPException
-from app.models.schema import Inventory, InventoryMovement, Product, Alert
+from app.models.schema import Inventory, InventoryMovement, Product, Alert, Warehouse
 from app.services.metrics_service import log_metric
 import time
 
@@ -58,7 +58,48 @@ class InventoryEventEngine:
                     product_sku = product_sku.strip().upper()
                     product = db.query(Product).filter(Product.sku == product_sku, Product.company_id == company_id).first()
                     if not product:
-                        raise ValueError(f"Product SKU {product_sku} not found for company {company_id}.")
+                        # Auto-replicate product from another company if incoming transfer or addition
+                        if event_type in ("TRANSFER_IN", "ADD"):
+                            src_prod = db.query(Product).filter(Product.sku == product_sku).first()
+                            if src_prod:
+                                product = Product(
+                                    company_id=company_id,
+                                    sku=src_prod.sku,
+                                    name=src_prod.name,
+                                    category=src_prod.category,
+                                    brand=src_prod.brand,
+                                    item_rate=src_prod.item_rate,
+                                    min_stock_level=src_prod.min_stock_level,
+                                    reorder_level=src_prod.reorder_level,
+                                    safety_stock=src_prod.safety_stock,
+                                    preferred_transfer_qty=src_prod.preferred_transfer_qty,
+                                    status=src_prod.status or "Active",
+                                    hsn=src_prod.hsn,
+                                    hsn_code=getattr(src_prod, 'hsn_code', None),
+                                    default_gst_rate=src_prod.default_gst_rate,
+                                    barcode=src_prod.barcode,
+                                    unit=src_prod.unit
+                                )
+                                db.add(product)
+                                db.flush()
+
+                                dest_whs = db.query(Warehouse).filter_by(company_id=company_id, status="ACTIVE").all()
+                                for d_wh in dest_whs:
+                                    if d_wh.id != warehouse_id:
+                                        inv_entry = Inventory(
+                                            company_id=company_id,
+                                            warehouse_id=d_wh.id,
+                                            product_id=product.id
+                                        )
+                                        inv_entry._allow_mutation = True
+                                        inv_entry.current_qty = 0
+                                        inv_entry.available_qty = 0
+                                        inv_entry.reserved_qty = 0
+                                        inv_entry._allow_mutation = False
+                                        db.add(inv_entry)
+                                db.flush()
+                        if not product:
+                            raise ValueError(f"Product SKU {product_sku} not found for company {company_id}.")
             
                     # Get current inventory with row-level lock
                     inventory = db.query(Inventory).filter(
