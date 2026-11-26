@@ -4,7 +4,7 @@ from sqlalchemy import exc
 from typing import List, Dict, Any, Optional
 
 from app.models.db import get_db
-from app.models.schema import User, Purchase, OfflinePurchase, Vendor
+from app.models.schema import User, Purchase, OfflinePurchase, Vendor, CompanyUser
 from app.api.routers.auth import get_current_user
 from app.api.dependencies import get_current_company_id
 from app.services.purchase_service import PurchaseService, PurchaseDraftRequest, PurchaseReceiveRequest, PurchasePaymentRequest
@@ -45,6 +45,7 @@ def update_purchase(
         raise HTTPException(status_code=400, detail="Database integrity error: " + str(e.orig))
     except Exception as e:
         db.rollback()
+        logger.exception("Error updating purchase: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/", summary="Create Purchase Draft")
@@ -178,7 +179,6 @@ def list_purchases(
 @router.get("/{purchase_id}", summary="Get Purchase Details")
 def get_purchase(
     purchase_id: int,
-    company_id: int = Depends(get_current_company_id),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
@@ -186,9 +186,17 @@ def get_purchase(
         joinedload(Purchase.vendor),
         joinedload(Purchase.warehouse),
         selectinload(Purchase.items)
-    ).filter_by(id=purchase_id, company_id=company_id).first()
+    ).filter_by(id=purchase_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Purchase not found")
+        
+    if user.role and user.role.upper() not in ["ADMIN", "SUPER_ADMIN", "MANAGER"]:
+        access = db.query(CompanyUser).filter(
+            CompanyUser.user_id == user.id,
+            CompanyUser.company_id == p.company_id
+        ).first()
+        if not access:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this company's purchases")
         
     items = []
     for item in p.items:
@@ -206,6 +214,7 @@ def get_purchase(
         
     return {
         "id": p.id,
+        "company_id": p.company_id,
         "vendor_id": p.vendor_id,
         "vendor_name": p.vendor.name if p.vendor else p.vendor_name,
         "invoice_number": p.invoice_number,

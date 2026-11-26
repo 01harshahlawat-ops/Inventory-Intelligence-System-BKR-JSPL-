@@ -14,6 +14,8 @@ export default function EditPurchase() {
   const { user } = useAuthStore();
   const { currentCompany } = useCompanyStore();
   const activeCompanyId = currentCompany?.id || 2;
+  const [purchaseCompanyId, setPurchaseCompanyId] = useState(null);
+  const effectiveCompanyId = purchaseCompanyId || activeCompanyId;
   
   const [vendorId, setVendorId] = useState(null);
   const [vendorName, setVendorName] = useState('');
@@ -47,6 +49,7 @@ export default function EditPurchase() {
         setInitialLoading(true);
         const res = await api.get(`/api/purchases/${id}`);
         const purchase = res.data;
+        setPurchaseCompanyId(purchase.company_id || null);
         setVendorId(purchase.vendor_id || null);
         setVendorName(purchase.vendor_name || '');
         setInvoiceNumber(purchase.invoice_number || '');
@@ -102,19 +105,25 @@ export default function EditPurchase() {
   }, []);
 
   const { data: vendors = [] } = useQuery({
-    queryKey: ['vendors'],
+    queryKey: ['vendors', effectiveCompanyId],
     queryFn: async () => {
-      const res = await api.get('/api/vendors/');
+      const res = await api.get('/api/vendors/', {
+        headers: { 'X-Company-Id': effectiveCompanyId.toString() }
+      });
       return res.data;
-    }
+    },
+    enabled: !!effectiveCompanyId
   });
 
   const { data: warehousesQuery = [] } = useQuery({
-    queryKey: ['warehouses', activeCompanyId],
+    queryKey: ['warehouses', effectiveCompanyId],
     queryFn: async () => {
-      const res = await api.get('/api/warehouses/');
+      const res = await api.get('/api/warehouses/', {
+        headers: { 'X-Company-Id': effectiveCompanyId.toString() }
+      });
       return res.data;
-    }
+    },
+    enabled: !!effectiveCompanyId
   });
 
   useEffect(() => {
@@ -195,7 +204,7 @@ export default function EditPurchase() {
       setLoading(true);
       const payload = {
         idempotency_key: draftIdempotency,
-        company_id: activeCompanyId,
+        company_id: effectiveCompanyId,
         vendor_id: vendorId || null,
         vendor_name: vendorName.trim(),
         invoice_number: invoiceNumber ? invoiceNumber.trim() : null,
@@ -215,7 +224,9 @@ export default function EditPurchase() {
         warehouse_id: warehouseId ? parseInt(warehouseId) : null
       };
 
-      await api.put(`/api/purchases/${id}`, payload);
+      await api.put(`/api/purchases/${id}`, payload, {
+        headers: { 'X-Company-Id': effectiveCompanyId.toString() }
+      });
       alert('Purchase bill updated successfully!');
       navigate('/purchases/list');
     } catch (e) {

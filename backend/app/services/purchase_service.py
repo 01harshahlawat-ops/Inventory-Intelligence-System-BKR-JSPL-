@@ -152,18 +152,21 @@ class PurchaseService:
         if not purchase:
             raise ValueError("Purchase not found")
         
+        target_company_id = purchase.company_id
         edit_timestamp = int(datetime.utcnow().timestamp())
         
         if purchase.status == "RECEIVED":
             # Reverse inventory for old items
             old_items = db.query(PurchaseItem).filter_by(purchase_id=purchase_id).all()
             mov = db.query(InventoryMovement).filter_by(source="PURCHASE", reference_id=purchase.invoice_number or f"PUR-{purchase.id}").first()
-            wh_id = mov.warehouse_id if mov else (purchase.warehouse_id or PurchaseService.get_default_warehouse(db, purchase.company_id))
+            wh_id = mov.warehouse_id if mov else (purchase.warehouse_id or PurchaseService.get_default_warehouse(db, target_company_id))
+            if not wh_id:
+                wh_id = PurchaseService.get_default_warehouse(db, target_company_id)
             
             for item in old_items:
                 InventoryEventEngine.process_event(
                     db=db,
-                    company_id=purchase.company_id,
+                    company_id=target_company_id,
                     product_sku=item.product_sku,
                     warehouse_id=wh_id,
                     quantity=int(round(item.qty)),
@@ -171,61 +174,97 @@ class PurchaseService:
                     source="PURCHASE_EDIT_REVERSE",
                     reference_id=purchase.invoice_number or f"PUR-{purchase.id}",
                     user_id=operator_id,
-                    metadata_payload={"operation_id": f"REV_{purchase.id}_{item.id}_{edit_timestamp}"}
+                    metadata_payload={"operation_id": f"REV_{purchase.id}_{item.id}_{edit_timestamp}"},
+                    allow_negative_stock=True
                 )
             
-        # Update Purchase Header
-        vendor = PurchaseService._get_or_create_vendor(db, request.company_id, request.vendor_id, request.vendor_name)
+        # Update Purchase Header using target_company_id
+        vendor = PurchaseService._get_or_create_vendor(db, target_company_id, request.vendor_id, request.vendor_name)
         purchase.vendor_id = vendor.id
         purchase.vendor_name = vendor.name
+
+        # Robust date parsing
         if request.bill_date:
-            purchase.date = datetime.fromisoformat(request.bill_date.replace('Z', ''))
+            try:
+                clean_date_str = str(request.bill_date).strip().replace('Z', '')
+                if 'T' in clean_date_str:
+                    purchase.date = datetime.fromisoformat(clean_date_str)
+                elif ' ' in clean_date_str:
+                    purchase.date = datetime.strptime(clean_date_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                else:
+                    purchase.date = datetime.strptime(clean_date_str[:10], "%Y-%m-%d")
+            except Exception:
+                pass
+
         purchase.payment_terms = request.payment_terms
         purchase.eway_bill = request.eway_bill
         purchase.vehicle_number = request.vehicle_number
-        purchase.invoice_number = request.invoice_number if request.invoice_number else None
+
+        # Validate unique invoice_number for this company
+        if request.invoice_number and request.invoice_number.strip():
+            clean_inv = request.invoice_number.strip()
+            existing_inv = db.query(Purchase).filter(
+                Purchase.company_id == target_company_id,
+                Purchase.invoice_number == clean_inv,
+                Purchase.id != purchase.id
+            ).first()
+            if existing_inv:
+                raise ValueError(f"Invoice number '{clean_inv}' is already in use by purchase #{existing_inv.id}.")
+            purchase.invoice_number = clean_inv
+        else:
+            purchase.invoice_number = None
+
         purchase.notes = request.notes
         if request.warehouse_id:
             purchase.warehouse_id = request.warehouse_id
         
         old_total = float(purchase.total_amount or 0.0)
         
-        # Delete old items
-        db.query(PurchaseItem).filter_by(purchase_id=purchase.id).delete()
+        # Safely delete old items in SQLAlchemy session
+        old_item_rows = db.query(PurchaseItem).filter_by(purchase_id=purchase.id).all()
+        for old_it in old_item_rows:
+            db.delete(old_it)
+        db.flush()
         
         # Insert new items
         total_amount = 0.0
         new_items = []
         for item_req in request.items:
-            # Inline create product if strictly matches SKU but doesn't exist
-            match = SKU_PATTERN.match(item_req.product_sku)
-            if match:
-                product = db.query(Product).filter_by(sku=item_req.product_sku).first()
-                if not product:
-                    new_product = Product(
-                        company_id=purchase.company_id,
-                        sku=item_req.product_sku,
-                        name=item_req.description,
-                        hsn=item_req.hsn,
-                        item_rate=item_req.unit_cost,
-                        default_gst_rate=item_req.gst_pct,
-                        status="Active"
-                    )
-                    db.add(new_product)
-                    db.flush()
+            norm_sku = strict_normalize_sku(item_req.product_sku) or item_req.product_sku.strip().upper()
+            
+            # Inline create product if strictly matches SKU but doesn't exist for target company
+            product = db.query(Product).filter(
+                Product.sku == norm_sku,
+                Product.company_id == target_company_id
+            ).first()
+            
+            if not product:
+                src_prod = db.query(Product).filter(Product.sku == norm_sku).first()
+                product = Product(
+                    company_id=target_company_id,
+                    sku=norm_sku,
+                    name=item_req.description or (src_prod.name if src_prod else norm_sku),
+                    hsn=item_req.hsn or (src_prod.hsn if src_prod else None),
+                    item_rate=item_req.unit_cost or (src_prod.item_rate if src_prod else 0.0),
+                    default_gst_rate=item_req.gst_pct if item_req.gst_pct is not None else (src_prod.default_gst_rate if src_prod else 0.0),
+                    status="Active"
+                )
+                db.add(product)
+                db.flush()
             
             base_val = item_req.qty * item_req.unit_cost
-            tax_amt = base_val * (item_req.gst_pct / 100)
+            tax_amt = base_val * ((item_req.gst_pct or 0.0) / 100.0)
             line_total = base_val + tax_amt
             total_amount += line_total
             
             p_item = PurchaseItem(
                 purchase_id=purchase.id,
-                product_sku=item_req.product_sku,
+                product_id=product.id if product else item_req.product_id,
+                product_sku=norm_sku,
                 description=item_req.description,
                 qty=item_req.qty,
                 unit_cost=item_req.unit_cost,
-                gst_pct=item_req.gst_pct,
+                gst_pct=item_req.gst_pct or 0.0,
                 hsn=item_req.hsn,
                 line_total=line_total
             )
@@ -248,12 +287,15 @@ class PurchaseService:
         # Re-apply inventory if status is RECEIVED
         if purchase.status == "RECEIVED":
             mov = db.query(InventoryMovement).filter_by(source="PURCHASE", reference_id=purchase.invoice_number or f"PUR-{purchase.id}").first()
-            wh_id = request.warehouse_id or purchase.warehouse_id or (mov.warehouse_id if mov else PurchaseService.get_default_warehouse(db, purchase.company_id))
+            wh_id = request.warehouse_id or purchase.warehouse_id or (mov.warehouse_id if mov else PurchaseService.get_default_warehouse(db, target_company_id))
+            if not wh_id:
+                wh_id = PurchaseService.get_default_warehouse(db, target_company_id)
             purchase.warehouse_id = wh_id
+            
             for p_item in new_items:
                 InventoryEventEngine.process_event(
                     db=db,
-                    company_id=purchase.company_id,
+                    company_id=target_company_id,
                     product_sku=p_item.product_sku,
                     warehouse_id=wh_id,
                     quantity=int(round(p_item.qty)),
