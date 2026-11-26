@@ -561,6 +561,12 @@ const POSPage = () => {
       // Invalidate next invoice number query so the next bill number refreshes immediately
       queryClient.invalidateQueries({ queryKey: ['nextInvoiceNumber'] });
 
+      if (data?.is_offline) {
+        setPendingCount(prev => prev + 1);
+        alert(data.message || 'Network disconnected. Sale saved safely to offline queue! You can sync it once back online.');
+        return;
+      }
+
       if (!receipt?.id) return;
 
       if (saleId) {
