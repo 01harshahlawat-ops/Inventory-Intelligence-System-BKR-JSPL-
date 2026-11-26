@@ -111,20 +111,18 @@ class AmazonService:
                     except Exception:
                         pass
 
-                if watermark:
-                    # Guard against stale/empty watermark jumps:
-                    # If watermark is ahead of our latest database order by more than 24h,
-                    # fall back to latest order date to prevent permanently skipping orders.
-                    if latest_alloc_date and (watermark - latest_alloc_date).total_seconds() > 86400:
-                        logger.warning(
-                            f"Watermark ({watermark}) is more than 24h ahead of latest allocation ({latest_alloc_date}). "
-                            f"Falling back to latest order date to backfill gap."
-                        )
-                        since = latest_alloc_date - timedelta(hours=2)
-                    else:
-                        since = watermark - timedelta(hours=2)
-                elif latest_alloc_date:
-                    since = latest_alloc_date - timedelta(hours=2)
+                # Guard against corrupted / regressed watermark:
+                # If watermark is behind latest_alloc_date by more than 2 hours, it regressed erroneously.
+                if watermark and latest_alloc_date and watermark < (latest_alloc_date - timedelta(hours=2)):
+                    logger.warning(
+                        f"Stored watermark ({watermark}) is behind latest allocation ({latest_alloc_date}). "
+                        f"Fast-forwarding watermark to latest allocation date."
+                    )
+                    watermark = latest_alloc_date
+
+                base_dt = watermark or latest_alloc_date
+                if base_dt:
+                    since = base_dt - timedelta(hours=2)
                 else:
                     since = datetime(2026, 8, 1)
 
@@ -226,6 +224,8 @@ class AmazonService:
                 except Exception:
                     purchase_date = last_update
 
+                if "max_purchase_date" not in counters or (purchase_date and purchase_date > counters["max_purchase_date"]):
+                    counters["max_purchase_date"] = purchase_date
                 if "max_order_date" not in counters or (last_update and last_update > counters["max_order_date"]):
                     counters["max_order_date"] = last_update
 
@@ -426,17 +426,16 @@ class AmazonService:
             sync_log.orders_processed = counters["processed"]
             sync_log.skipped_duplicates = counters["skipped"]
             sync_log.failed_items = counters["failed"]
-            if counters["processed"] > 0 and counters.get("max_order_date"):
-                watermark_ts = counters["max_order_date"]
-            elif counters["processed"] == 0:
-                # If 0 orders were processed, only advance to end_time if since was within the last 2 hours.
-                # Never leap forward over an un-synced gap when 0 orders were fetched.
-                if (datetime.utcnow() - since).total_seconds() <= 7200:
-                    watermark_ts = end_time
-                else:
-                    watermark_ts = since
+            # High-watermark advancement:
+            # Watermark tracks the furthest time horizon successfully synchronized.
+            # A watermark must NEVER regress backwards into the past.
+            prior_watermark = watermark or latest_alloc_date or since
+            if max_pages:
+                candidate_wm = counters.get("max_purchase_date") or counters.get("max_order_date") or prior_watermark
             else:
-                watermark_ts = counters.get("max_order_date", end_time if not max_pages else since)
+                candidate_wm = max(counters.get("max_purchase_date") or start_time, start_time)
+
+            watermark_ts = max(prior_watermark, candidate_wm)
             sync_log.api_response_status = f"watermark:{watermark_ts.isoformat()}"
             db.commit()
 
