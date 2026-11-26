@@ -1267,7 +1267,7 @@ def get_tally_payload(sale_id: int, company_id: int = Depends(get_bkr_company_id
     try:
         import json
         json_payload = TallyPayloadBuilder.build_json(sale)
-        xml_payload = TallyPayloadBuilder.build_xml(sale)
+        xml_payload = TallyPayloadBuilder.build_xml(sale, db=db)
         
         return {
             "json": json.dumps(json_payload, indent=2),

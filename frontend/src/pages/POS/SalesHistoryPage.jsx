@@ -160,6 +160,27 @@ const SalesHistoryPage = () => {
     }
   };
 
+  const handleDownloadTallyXml = async (sale) => {
+    try {
+      const response = await posService.getTallyPayload(sale.id);
+      const xmlData = response?.xml || response?.data?.xml;
+      if (!xmlData) {
+        throw new Error('No Tally XML data returned for this sale');
+      }
+      const url = window.URL.createObjectURL(new Blob([xmlData], { type: 'application/xml' }));
+      const link = document.createElement('a');
+      link.href = url;
+      const invNo = (sale.invoice_number || sale.bill_number || `Bill_${sale.id}`).replace(/[\/\\]/g, '_');
+      link.setAttribute('download', `Tally_${invNo}.xml`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      handleApiError(err, 'Failed to download Tally XML');
+    }
+  };
+
   const handleDownloadBulkJson = async () => {
     try {
       setExportingBulkJson(true);
@@ -333,13 +354,23 @@ const SalesHistoryPage = () => {
             </button>
           )}
           {sale.invoice_type === 'B2B' && sale.status !== 'Cancelled' && (
-            <button 
-              className={`${styles.actionBtn} ${styles.jsonBtn}`} 
-              title="Download Government E-Invoice JSON (INV-01)"
-              onClick={() => handleDownloadSingleJson(sale)}
-            >
-              <FiDownload /> JSON
-            </button>
+            <>
+              <button 
+                className={`${styles.actionBtn} ${styles.jsonBtn}`} 
+                title="Download Government E-Invoice JSON (INV-01)"
+                onClick={() => handleDownloadSingleJson(sale)}
+              >
+                <FiDownload /> JSON
+              </button>
+              <button 
+                className={`${styles.actionBtn} ${styles.jsonBtn}`} 
+                style={{ background: '#f8fafc', color: '#0369a1', borderColor: '#bae6fd' }}
+                title="Download TallyPrime XML Voucher"
+                onClick={() => handleDownloadTallyXml(sale)}
+              >
+                <FiDownload /> Tally XML
+              </button>
+            </>
           )}
         </div>
       )
