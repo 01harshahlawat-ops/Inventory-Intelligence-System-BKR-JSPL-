@@ -128,7 +128,13 @@ const SalesHistoryPage = () => {
       setGeneratingIrnId(sale.id);
       const res = await einvoiceService.generateIRN(sale.id, isRetry);
       const irnText = res?.irn ? (String(res.irn).length > 16 ? `${String(res.irn).substring(0, 16)}...` : String(res.irn)) : 'Generated';
-      alert(`E-Invoice IRN Generated Successfully!\nIRN: ${irnText}\nAck No: ${res?.ack_no || '-'}`);
+      let msg = `E-Invoice IRN Generated Successfully!\nIRN: ${irnText}\nAck No: ${res?.ack_no || '-'}`;
+      if (res?.tally_sync?.status === 'SUCCESS') {
+        msg += `\nTally Sync: Succeeded (${res.tally_sync.reference || 'Synced'})`;
+      } else if (res?.tally_sync?.status === 'FAILED') {
+        msg += `\nTally Sync: Failed (${res.tally_sync.error_message || 'Endpoint offline'})`;
+      }
+      alert(msg);
       queryClient.invalidateQueries({ queryKey: ['sales'] });
     } catch (err) {
       handleApiError(err, 'Failed to generate E-Invoice IRN');

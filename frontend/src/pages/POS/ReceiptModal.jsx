@@ -1,4 +1,5 @@
 import React from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import styles from './ReceiptModal.module.css';
 import { formatDate } from '../../utils/dateUtils';
 
@@ -114,6 +115,27 @@ const ReceiptModal = ({ receipt, onClose, isPreview, onComplete, isPending }) =>
             </div>
           )}
 
+          {(receipt.einvoice_irn || receipt.einvoice?.irn) && (
+            <div style={{ textAlign: 'center', margin: '12px 0 6px 0', borderTop: '1px dashed #ccc', paddingTop: '8px' }}>
+              <div style={{ display: 'inline-block', padding: '4px', background: '#fff' }}>
+                <QRCodeSVG 
+                  value={receipt.einvoice_qr_code_data || receipt.einvoice?.qr_code_data || receipt.einvoice_irn || receipt.einvoice?.irn} 
+                  size={72} 
+                  level="M" 
+                />
+              </div>
+              <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#1e40af', marginTop: '4px' }}>e-Invoice IRN</div>
+              <div style={{ fontSize: '8px', wordBreak: 'break-all', color: '#334155' }}>
+                {receipt.einvoice_irn || receipt.einvoice?.irn}
+              </div>
+              {(receipt.einvoice_ack_no || receipt.einvoice?.ack_no) && (
+                <div style={{ fontSize: '9px', color: '#475569' }}>
+                  Ack No: {receipt.einvoice_ack_no || receipt.einvoice?.ack_no}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className={styles.footer}>
             Thank you for shopping with us!
           </div>
@@ -124,9 +146,20 @@ const ReceiptModal = ({ receipt, onClose, isPreview, onComplete, isPending }) =>
             {isPreview ? 'Back to Edit' : 'Close'}
           </button>
           {!isPreview && (
-            <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={handlePrint}>
-              Print Receipt
-            </button>
+            <>
+              <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={handlePrint}>
+                Print Receipt
+              </button>
+              {(receipt.id || receipt.sale_id) && (
+                <button 
+                  className={`${styles.btn} ${styles.btnPrimary}`} 
+                  style={{ background: '#0284c7' }}
+                  onClick={() => window.open(`/sales/${receipt.id || receipt.sale_id}/invoice`, '_blank')}
+                >
+                  Print Tax Invoice (A4)
+                </button>
+              )}
+            </>
           )}
           {isPreview && (
             <button 

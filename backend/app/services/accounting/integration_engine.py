@@ -54,6 +54,10 @@ class AccountingIntegrationEngine:
             total_taxable_amount=sale.total_taxable_amount,
             total_tax=sale.total_tax,
             grand_total=sale.grand_total,
+            einvoice_irn=sale.einvoice_irn,
+            einvoice_ack_no=sale.einvoice_ack_no,
+            einvoice_ack_date=sale.einvoice_ack_date,
+            einvoice_qr_code_data=sale.einvoice_qr_code_data,
             lines=lines,
             company_id=self.company_id
         )
