@@ -101,6 +101,22 @@ def generate_irn(
 
     try:
         result = EInvoiceService.generate_irn_for_sale(sale_id=sale.id, db=db, force_retry=force_retry)
+        
+        # Auto-trigger Tally sync if enabled for this company
+        from app.services.tally_integration_service import TallyIntegrationService
+        if TallyIntegrationService.is_enabled_for_company(db, company_id):
+            try:
+                tally_res = TallyIntegrationService.sync_sale(db, sale_id=sale.id, mode="PROCESSING")
+                result["tally_sync"] = {
+                    "status": tally_res.status,
+                    "reference": tally_res.reference,
+                    "error_message": tally_res.error_message
+                }
+            except Exception as t_err:
+                import logging
+                logging.getLogger(__name__).warning(f"Tally sync after IRN gen failed for sale {sale.id}: {t_err}")
+                result["tally_sync"] = {"status": "FAILED", "error_message": str(t_err)}
+
         return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

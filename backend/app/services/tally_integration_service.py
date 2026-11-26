@@ -93,7 +93,7 @@ class TallyIntegrationService:
                 payload = TallyPayloadBuilder.build_json(sale)
                 resp = requests.post(endpoint, json=payload, timeout=20)
             else:
-                payload = TallyPayloadBuilder.build_xml(sale)
+                payload = TallyPayloadBuilder.build_xml(sale, db=db)
                 resp = requests.post(endpoint, data=payload.encode("utf-8"), headers={"Content-Type": "text/xml"}, timeout=20)
 
             if 200 <= resp.status_code < 300:

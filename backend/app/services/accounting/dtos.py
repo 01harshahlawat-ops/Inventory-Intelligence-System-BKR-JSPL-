@@ -33,6 +33,12 @@ class InvoiceDTO(BaseModel):
     total_taxable_amount: float
     total_tax: float
     grand_total: float
+
+    # E-Invoice
+    einvoice_irn: Optional[str] = None
+    einvoice_ack_no: Optional[str] = None
+    einvoice_ack_date: Optional[datetime] = None
+    einvoice_qr_code_data: Optional[str] = None
     
     # Lines
     lines: List[InvoiceLineDTO] = []

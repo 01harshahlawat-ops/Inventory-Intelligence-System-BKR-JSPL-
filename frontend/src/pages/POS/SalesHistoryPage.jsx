@@ -128,7 +128,13 @@ const SalesHistoryPage = () => {
       setGeneratingIrnId(sale.id);
       const res = await einvoiceService.generateIRN(sale.id, isRetry);
       const irnText = res?.irn ? (String(res.irn).length > 16 ? `${String(res.irn).substring(0, 16)}...` : String(res.irn)) : 'Generated';
-      alert(`E-Invoice IRN Generated Successfully!\nIRN: ${irnText}\nAck No: ${res?.ack_no || '-'}`);
+      let msg = `E-Invoice IRN Generated Successfully!\nIRN: ${irnText}\nAck No: ${res?.ack_no || '-'}`;
+      if (res?.tally_sync?.status === 'SUCCESS') {
+        msg += `\nTally Sync: Succeeded (${res.tally_sync.reference || 'Synced'})`;
+      } else if (res?.tally_sync?.status === 'FAILED') {
+        msg += `\nTally Sync: Failed (${res.tally_sync.error_message || 'Endpoint offline'})`;
+      }
+      alert(msg);
       queryClient.invalidateQueries({ queryKey: ['sales'] });
     } catch (err) {
       handleApiError(err, 'Failed to generate E-Invoice IRN');
@@ -151,6 +157,27 @@ const SalesHistoryPage = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       handleApiError(err, 'Failed to download E-Invoice JSON');
+    }
+  };
+
+  const handleDownloadTallyXml = async (sale) => {
+    try {
+      const response = await posService.getTallyPayload(sale.id);
+      const xmlData = response?.xml || response?.data?.xml;
+      if (!xmlData) {
+        throw new Error('No Tally XML data returned for this sale');
+      }
+      const url = window.URL.createObjectURL(new Blob([xmlData], { type: 'application/xml' }));
+      const link = document.createElement('a');
+      link.href = url;
+      const invNo = (sale.invoice_number || sale.bill_number || `Bill_${sale.id}`).replace(/[\/\\]/g, '_');
+      link.setAttribute('download', `Tally_${invNo}.xml`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      handleApiError(err, 'Failed to download Tally XML');
     }
   };
 
@@ -327,13 +354,23 @@ const SalesHistoryPage = () => {
             </button>
           )}
           {sale.invoice_type === 'B2B' && sale.status !== 'Cancelled' && (
-            <button 
-              className={`${styles.actionBtn} ${styles.jsonBtn}`} 
-              title="Download Government E-Invoice JSON (INV-01)"
-              onClick={() => handleDownloadSingleJson(sale)}
-            >
-              <FiDownload /> JSON
-            </button>
+            <>
+              <button 
+                className={`${styles.actionBtn} ${styles.jsonBtn}`} 
+                title="Download Government E-Invoice JSON (INV-01)"
+                onClick={() => handleDownloadSingleJson(sale)}
+              >
+                <FiDownload /> JSON
+              </button>
+              <button 
+                className={`${styles.actionBtn} ${styles.jsonBtn}`} 
+                style={{ background: '#f8fafc', color: '#0369a1', borderColor: '#bae6fd' }}
+                title="Download TallyPrime XML Voucher"
+                onClick={() => handleDownloadTallyXml(sale)}
+              >
+                <FiDownload /> Tally XML
+              </button>
+            </>
           )}
         </div>
       )

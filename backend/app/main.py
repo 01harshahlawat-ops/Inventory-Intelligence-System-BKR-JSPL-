@@ -211,7 +211,8 @@ origins = [
     "http://127.0.0.1:5174",
     "http://127.0.0.1:5175",
     "https://halte-data-transformation.vercel.app",
-    "https://inventory-intelligence-system-bkr-j.vercel.app"
+    "https://inventory-intelligence-system-bkr-j.vercel.app",
+    "https://inventory-intelligence-system-bkr-jspl.vercel.app",
 ]
 
 # Allow dynamic origins via environment variable (useful for Vercel preview URLs)
@@ -223,6 +224,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

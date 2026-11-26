@@ -725,8 +725,21 @@ def complete_sale(
         )
         if commit:
             db.commit()
-        
-        # Tally sync (B2B only, configurable) - runs AFTER sale is committed
+
+        # 1. E-Invoice Generation (B2B only, configurable) - runs FIRST so Tally receives the generated IRN
+        if commit and (sale.invoice_type == "B2B" or (sale.customer_gstin and len(sale.customer_gstin.strip()) >= 15)):
+            try:
+                settings = db.query(CompanySettings).filter(CompanySettings.company_id == company_id).first()
+                if settings and settings.einvoice_enabled:
+                    cfg = settings.einvoice_config or {}
+                    if cfg.get("auto_generate_on_pos", False):
+                        from app.services.einvoice.einvoice_service import EInvoiceService
+                        EInvoiceService.generate_irn_for_sale(sale_id=sale.id, db=db)
+                        db.refresh(sale)
+            except Exception as e_err:
+                logging.getLogger(__name__).warning(f"Auto E-Invoice failed for sale {sale.id}: {e_err}")
+
+        # 2. Tally sync (B2B only, configurable) - runs AFTER E-Invoice so Tally gets the IRN
         # Tally failures should NOT rollback the sale
         tally_result = {"status": sale.tally_sync_status}
         if sale.invoice_type == "B2B":
@@ -762,18 +775,6 @@ def complete_sale(
                 else:
                     db.flush()
                 tally_result = {"status": "FAILED", "error_message": str(tally_err)}
-
-        # E-Invoice Generation (B2B only, configurable) - runs AFTER sale is committed
-        if commit and sale.customer_gstin and len(sale.customer_gstin.strip()) >= 15:
-            try:
-                settings = db.query(CompanySettings).filter(CompanySettings.company_id == company_id).first()
-                if settings and settings.einvoice_enabled:
-                    cfg = settings.einvoice_config or {}
-                    if cfg.get("auto_generate_on_pos", False):
-                        from app.services.einvoice.einvoice_service import EInvoiceService
-                        EInvoiceService.generate_irn_for_sale(sale_id=sale.id, db=db)
-            except Exception as e_err:
-                logging.getLogger(__name__).warning(f"Auto E-Invoice failed for sale {sale.id}: {e_err}")
 
         # Add audit logs
         AuditLogService.log(
@@ -1266,7 +1267,7 @@ def get_tally_payload(sale_id: int, company_id: int = Depends(get_bkr_company_id
     try:
         import json
         json_payload = TallyPayloadBuilder.build_json(sale)
-        xml_payload = TallyPayloadBuilder.build_xml(sale)
+        xml_payload = TallyPayloadBuilder.build_xml(sale, db=db)
         
         return {
             "json": json.dumps(json_payload, indent=2),
