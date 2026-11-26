@@ -505,12 +505,13 @@ class FCDispatchService:
                 # Pre-fetch central warehouse 39 inventory to split correctly between WH 39 and WH 2
                 wh_ids = [39, 2] if source_warehouse.id in (39, 2) else [source_warehouse.id]
                 wh39_avail_map = {}
+                src_comp_id = source_warehouse.company_id
                 if len(wh_ids) > 1:
                     wh39_records = db.query(
                         Inventory.product_id,
                         Inventory.available_qty
                     ).filter(
-                        Inventory.company_id == company_id,
+                        Inventory.company_id == src_comp_id,
                         Inventory.warehouse_id == 39,
                         Inventory.product_id.in_([it.product_id for it in pos_items])
                     ).all()
@@ -554,7 +555,7 @@ class FCDispatchService:
                         qty_from_2 = it.quantity - qty_from_39
                         if qty_from_39 > 0:
                             batch_inventory_events.append({
-                                "company_id": company_id,
+                                "company_id": src_comp_id,
                                 "product_sku": it.sku,
                                 "warehouse_id": 39,
                                 "quantity": qty_from_39,
@@ -566,7 +567,7 @@ class FCDispatchService:
                             })
                         if qty_from_2 > 0:
                             batch_inventory_events.append({
-                                "company_id": company_id,
+                                "company_id": src_comp_id,
                                 "product_sku": it.sku,
                                 "warehouse_id": 2,
                                 "quantity": qty_from_2,
@@ -578,7 +579,7 @@ class FCDispatchService:
                             })
                     else:
                         batch_inventory_events.append({
-                            "company_id": company_id,
+                            "company_id": src_comp_id,
                             "product_sku": it.sku,
                             "warehouse_id": source_warehouse.id,
                             "quantity": it.quantity,

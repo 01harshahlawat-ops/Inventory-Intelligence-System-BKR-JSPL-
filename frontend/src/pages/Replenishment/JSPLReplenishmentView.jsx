@@ -28,11 +28,14 @@ const JSPLReplenishmentView = () => {
   useEffect(() => {
     if (warehouses.length > 0) {
       if (!sourceWarehouseId) {
-        const bkrWh = warehouses.find(w => w.company_id === 2);
+        const bkrWh = warehouses.find(w => w.company_id === 2 && (w.warehouse_type === 'CENTRAL' || w.code === 'BKR_CENTRAL' || w.id === 39))
+          || warehouses.find(w => w.company_id === 2);
         if (bkrWh) setSourceWarehouseId(bkrWh.id.toString());
       }
       if (!destWarehouseId) {
-        const jsplWh = warehouses.find(w => w.company_id === (companyId || 3)) || warehouses.find(w => w.company_id === 3);
+        const targetCompanyId = companyId || 3;
+        const jsplWh = warehouses.find(w => w.company_id === targetCompanyId && (w.warehouse_type === 'CENTRAL' || w.code === 'VSHB' || w.id === 14))
+          || warehouses.find(w => w.company_id === targetCompanyId);
         if (jsplWh) setDestWarehouseId(jsplWh.id.toString());
       }
     }

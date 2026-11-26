@@ -33,6 +33,8 @@ const BKRInvoiceGenerator = () => {
   useEffect(() => {
     if (activeWarehouses.length > 0 && !selectedWarehouseId) {
       const defaultWh = activeWarehouses.find(w => 
+        w.id === 39 ||
+        (w.code || '').toUpperCase().includes('CENTRAL') || 
         (w.code || '').toUpperCase().includes('DEFAULT') || 
         (w.code || '').toUpperCase().includes('MAIN') ||
         (w.code || '').toUpperCase().includes('POS')
@@ -52,7 +54,7 @@ const BKRInvoiceGenerator = () => {
           product: (typeof item.product === 'object' ? item.product?.name : item.product) || item.sku,
           requestedQty: item.requested_qty,
           bkrStock: item.available_qty,
-          approvedQty: item.requested_qty,
+          approvedQty: Math.min(item.requested_qty, item.available_qty >= 0 ? item.available_qty : item.requested_qty),
           rate: item.unit_price || 0,
           hsn_sac: item.hsn_sac || '',
           gstRate: item.gst_rate || 18
@@ -169,6 +171,7 @@ const BKRInvoiceGenerator = () => {
         total_taxable_amount: subtotalVal,
         total_tax: taxVal,
         grand_total: totalVal,
+        origin_warehouse_id: selectedWarehouseId ? parseInt(selectedWarehouseId, 10) : undefined,
         skip_inventory_update: true,
         items: items.filter(item => item.approvedQty > 0).map(item => {
           const lineTotal = item.approvedQty * item.rate;
