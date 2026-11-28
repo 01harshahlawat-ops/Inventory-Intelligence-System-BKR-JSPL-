@@ -78,8 +78,18 @@ const BatchDispatchCreator = () => {
           api.get(`/api/state-hubs/?all_companies=${allowOtherCompanies}`, { headers }),
           api.get(`/api/warehouses/?all_companies=${allowOtherCompanies}`, { headers })
         ]);
+        const loadedWhs = whRes.data || [];
         setHubs(hubsRes.data || []);
-        setWarehouses(whRes.data || []);
+        setWarehouses(loadedWhs);
+        if (!sourceWarehouseId && loadedWhs.length > 0) {
+          const defaultCentral = loadedWhs.find(w => w.warehouse_type === 'CENTRAL' && w.company_id === currentCompany?.id)
+            || loadedWhs.find(w => w.warehouse_type === 'CENTRAL')
+            || loadedWhs.find(w => w.company_id === currentCompany?.id)
+            || loadedWhs[0];
+          if (defaultCentral) {
+            setSourceWarehouseId(defaultCentral.id);
+          }
+        }
       } catch (err) {
         console.error('Failed to load destinations', err);
       } finally {
@@ -388,35 +398,42 @@ const BatchDispatchCreator = () => {
               
               <div className={styles.sourceGrid}>
                 {/* Dynamic Central Card */}
-                <div 
-                  className={`${styles.sourceCard} ${!sourceWarehouseId ? styles.sourceCardBkrActive : ''}`}
-                  onClick={() => {
-                      const centralWh = warehouses.find(w => w.warehouse_type === 'CENTRAL' && w.company_id === currentCompany?.id) || warehouses[0];
-                      if (centralWh) setSourceWarehouseId(centralWh.id);
-                  }}
-                  style={{ opacity: dispatchType === 'EMERGENCY' ? 0.5 : 1, cursor: dispatchType === 'EMERGENCY' ? 'not-allowed' : 'pointer' }}
-                >
-                  <div className={styles.sourceHeader}>
-                    <div className={styles.sourceTitleGroup}>
-                      <div className={`${styles.sourceIconBox} ${!sourceWarehouseId ? styles.sourceIconBoxBkrActive : ''}`}>
-                        <Building2 />
+                {(() => {
+                  const centralWh = warehouses.find(w => w.warehouse_type === 'CENTRAL' && w.company_id === currentCompany?.id)
+                    || warehouses.find(w => w.warehouse_type === 'CENTRAL')
+                    || warehouses[0];
+                  const isCentralActive = centralWh && (!sourceWarehouseId || sourceWarehouseId === centralWh.id);
+                  return (
+                    <div 
+                      className={`${styles.sourceCard} ${isCentralActive ? styles.sourceCardBkrActive : ''}`}
+                      onClick={() => {
+                          if (centralWh) setSourceWarehouseId(centralWh.id);
+                      }}
+                      style={{ opacity: dispatchType === 'EMERGENCY' ? 0.5 : 1, cursor: dispatchType === 'EMERGENCY' ? 'not-allowed' : 'pointer' }}
+                    >
+                      <div className={styles.sourceHeader}>
+                        <div className={styles.sourceTitleGroup}>
+                          <div className={`${styles.sourceIconBox} ${isCentralActive ? styles.sourceIconBoxBkrActive : ''}`}>
+                            <Building2 />
+                          </div>
+                          <div>
+                            <h3 className={`${styles.sourceTitle} ${isCentralActive ? styles.sourceTitleBkrActive : ''}`}>{currentCompany?.name || 'Main'} Central Warehouse</h3>
+                            <p className={styles.sourceSubtitle}>Primary Distribution Hub</p>
+                          </div>
+                        </div>
+                        {isCentralActive && (
+                          <div className={`${styles.sourceCheck} ${styles.sourceCheckBkr}`}>
+                            <Check size={16} strokeWidth={3} />
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <h3 className={`${styles.sourceTitle} ${!sourceWarehouseId ? styles.sourceTitleBkrActive : ''}`}>{currentCompany?.name || 'Main'} Central Warehouse</h3>
-                        <p className={styles.sourceSubtitle}>Primary Distribution Hub</p>
+                      
+                      <div className={styles.sourceDesc}>
+                        Use this option to dispatch fresh stock from your primary central hub to regional fulfillment centers.
                       </div>
                     </div>
-                    {!sourceWarehouseId && (
-                      <div className={`${styles.sourceCheck} ${styles.sourceCheckBkr}`}>
-                        <Check size={16} strokeWidth={3} />
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className={styles.sourceDesc}>
-                    Use this option to dispatch fresh stock from your primary central hub to regional fulfillment centers.
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
               
               <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>

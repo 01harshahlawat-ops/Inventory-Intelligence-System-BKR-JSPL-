@@ -261,7 +261,8 @@ class StockTransferService:
                     source="Transfer In",
                     reference_id=transfer.transfer_number,
                     user_id=user_id,
-                    metadata_payload={"source_company_id": transfer.from_company_id}
+                    metadata_payload={"source_company_id": transfer.from_company_id},
+                    allow_negative_stock=True
                 )
 
             # Track unfulfilled quantities for backorder

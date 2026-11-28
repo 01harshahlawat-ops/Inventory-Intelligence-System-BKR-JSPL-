@@ -247,27 +247,41 @@ class FCDispatchService:
                 tax_total = 0.0
 
                 req_pids = [r.product_id for r in request.items]
-                products_by_id = {p.id: p for p in db.query(Product).filter(Product.id.in_(req_pids)).all()}
-                
+                input_products = db.query(Product).filter(Product.id.in_(req_pids)).all()
+                input_products_by_id = {p.id: p for p in input_products}
+
+                # Resolve source company products by SKU (handling cross-company ID mismatches)
+                skus_needed = [p.sku for p in input_products if p.sku]
+                src_company_products = db.query(Product).filter(
+                    Product.company_id == source_warehouse.company_id,
+                    Product.sku.in_(skus_needed)
+                ).all()
+                src_prod_by_sku = {(p.sku or "").upper(): p for p in src_company_products if p.sku}
+
                 # Check source warehouse inventory in ONE query
                 source_wh_ids = [39, 2] if source_warehouse.id in (39, 2) else [source_warehouse.id]
+                src_pids = [p.id for p in src_company_products]
+                all_check_pids = list(set(src_pids + [p.id for p in input_products if p.company_id == source_warehouse.company_id]))
+
                 source_inv_records = db.query(
                     Inventory.product_id,
                     func.sum(Inventory.available_qty).label("total_avail")
                 ).filter(
                     Inventory.company_id == source_warehouse.company_id,
                     Inventory.warehouse_id.in_(source_wh_ids),
-                    Inventory.product_id.in_(req_pids)
-                ).group_by(Inventory.product_id).all()
+                    Inventory.product_id.in_(all_check_pids)
+                ).group_by(Inventory.product_id).all() if all_check_pids else []
                 source_avail_map = {r.product_id: (r.total_avail or 0) for r in source_inv_records}
                 
                 for req_item in request.items:
                     if req_item.quantity <= 0:
                         raise HTTPException(status_code=400, detail="Transfer quantity must be greater than zero")
 
-                    product = products_by_id.get(req_item.product_id)
-                    if not product:
+                    input_prod = input_products_by_id.get(req_item.product_id)
+                    if not input_prod:
                         raise HTTPException(status_code=404, detail=f"Product {req_item.product_id} not found")
+
+                    product = src_prod_by_sku.get((input_prod.sku or "").upper()) or input_prod
                     
                     avail_qty = source_avail_map.get(product.id, 0)
                     if req_item.quantity > avail_qty:
@@ -508,14 +522,14 @@ class FCDispatchService:
                 src_comp_id = source_warehouse.company_id
                 if len(wh_ids) > 1:
                     wh39_records = db.query(
-                        Inventory.product_id,
+                        Product.sku,
                         Inventory.available_qty
-                    ).filter(
+                    ).join(Product, Product.id == Inventory.product_id).filter(
                         Inventory.company_id == src_comp_id,
                         Inventory.warehouse_id == 39,
-                        Inventory.product_id.in_([it.product_id for it in pos_items])
+                        Product.sku.in_([it.sku for it in pos_items])
                     ).all()
-                    wh39_avail_map = {r.product_id: max(0, r.available_qty or 0) for r in wh39_records}
+                    wh39_avail_map = {(r.sku or "").upper(): max(0, r.available_qty or 0) for r in wh39_records}
 
                 dispatch_items_to_add = []
                 st_items_to_add = []
@@ -550,7 +564,7 @@ class FCDispatchService:
 
                     # Deduct from Source
                     if len(wh_ids) > 1:
-                        central_avail = wh39_avail_map.get(it.product_id, 0)
+                        central_avail = wh39_avail_map.get((it.sku or "").upper(), 0)
                         qty_from_39 = min(it.quantity, central_avail)
                         qty_from_2 = it.quantity - qty_from_39
                         if qty_from_39 > 0:
@@ -597,6 +611,7 @@ class FCDispatchService:
                         "warehouse_id": dest_warehouse.id,
                         "quantity": it.quantity,
                         "event_type": "TRANSFER_IN",
+                        "allow_negative_stock": True,
                         "source": "FC_DISPATCH_IN",
                         "reference_id": dispatch_num,
                         "user_id": user_id,
