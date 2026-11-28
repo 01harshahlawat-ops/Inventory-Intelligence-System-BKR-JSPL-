@@ -24,61 +24,88 @@ class StockTransferService:
         if transfer.status not in ("Pending", "Approved"):
             raise ValueError("Transfer cannot be completed. It might already be processed.")
             
-        # Get actual quantities fulfilled from the invoice
+        # Get actual quantities fulfilled from the invoice (by product_id and sku for robust cross-company matching)
         fulfilled_qty_map = {}
+        fulfilled_sku_map = {}
         sale_items = db.query(SaleItem).filter(SaleItem.sale_id == invoice_id).all()
         for si in sale_items:
-            fulfilled_qty_map[si.product_id] = si.quantity
+            if si.product_id:
+                fulfilled_qty_map[si.product_id] = si.quantity
+            if si.sku:
+                fulfilled_sku_map[si.sku.strip().upper()] = si.quantity
             
         unfulfilled_items = []
 
         # ===== PRE-FLIGHT DESTINATION SKU VALIDATION & AUTO-CREATION =====
         if transfer.from_company_id != transfer.to_company_id:
             for item in transfer.items:
-                qty = fulfilled_qty_map.get(item.product_id, 0)
-                if qty <= 0: continue
                 product = db.query(Product).filter(Product.id == item.product_id).first()
-                if product:
-                    dest_product = db.query(Product).filter(Product.sku == product.sku, Product.company_id == transfer.to_company_id).first()
-                    if not dest_product:
-                        dest_product = Product(
-                            company_id=transfer.to_company_id,
-                            sku=product.sku,
-                            name=product.name,
-                            category=product.category,
-                            brand=product.brand,
-                            item_rate=product.item_rate,
-                            min_stock_level=product.min_stock_level,
-                            reorder_level=product.reorder_level,
-                            safety_stock=product.safety_stock,
-                            preferred_transfer_qty=product.preferred_transfer_qty,
-                            status=product.status or "Active",
-                            hsn=product.hsn,
-                            hsn_code=getattr(product, 'hsn_code', None),
-                            default_gst_rate=product.default_gst_rate,
-                            barcode=product.barcode,
-                            unit=product.unit
-                        )
-                        db.add(dest_product)
-                        db.flush()
+                if not product:
+                    continue
+                sku = product.sku.strip().upper() if product.sku else ""
+                qty = fulfilled_qty_map.get(item.product_id)
+                if qty is None and sku:
+                    qty = fulfilled_sku_map.get(sku, 0)
+                if qty is None or qty <= 0:
+                    continue
 
-                        dest_warehouses = db.query(Warehouse).filter_by(company_id=transfer.to_company_id, status="ACTIVE").all()
-                        for dw in dest_warehouses:
-                            inv = Inventory(
-                                company_id=transfer.to_company_id,
-                                warehouse_id=dw.id,
-                                product_id=dest_product.id
-                            )
-                            inv._allow_mutation = True
-                            inv.current_qty = 0
-                            inv.available_qty = 0
-                            inv.reserved_qty = 0
-                            inv._allow_mutation = False
-                            db.add(inv)
-                        db.flush()
+                dest_product = None
+                if product.company_id == transfer.to_company_id:
+                    dest_product = product
+                elif sku:
+                    dest_product = db.query(Product).filter(
+                        Product.sku == product.sku,
+                        Product.company_id == transfer.to_company_id
+                    ).first()
+
+                if not dest_product:
+                    dest_product = Product(
+                        company_id=transfer.to_company_id,
+                        sku=product.sku,
+                        name=product.name,
+                        category=product.category,
+                        brand=product.brand,
+                        item_rate=product.item_rate,
+                        min_stock_level=product.min_stock_level,
+                        reorder_level=product.reorder_level,
+                        safety_stock=product.safety_stock,
+                        preferred_transfer_qty=product.preferred_transfer_qty,
+                        status=product.status or "Active",
+                        hsn=product.hsn,
+                        hsn_code=getattr(product, 'hsn_code', None),
+                        default_gst_rate=product.default_gst_rate,
+                        barcode=product.barcode,
+                        unit=product.unit
+                    )
+                    db.add(dest_product)
+                    db.flush()
+
+                    dest_warehouses = db.query(Warehouse).filter_by(company_id=transfer.to_company_id, status="ACTIVE").all()
+                    for dw in dest_warehouses:
+                        inv = Inventory(
+                            company_id=transfer.to_company_id,
+                            warehouse_id=dw.id,
+                            product_id=dest_product.id
+                        )
+                        inv._allow_mutation = True
+                        inv.current_qty = 0
+                        inv.available_qty = 0
+                        inv.reserved_qty = 0
+                        inv._allow_mutation = False
+                        db.add(inv)
+                    db.flush()
 
         for item in transfer.items:
-            qty = fulfilled_qty_map.get(item.product_id, 0)
+            product = db.query(Product).filter(Product.id == item.product_id).first()
+            if not product:
+                continue
+
+            sku = product.sku.strip().upper() if product.sku else ""
+            qty = fulfilled_qty_map.get(item.product_id)
+            if qty is None and sku:
+                qty = fulfilled_sku_map.get(sku, 0)
+            if qty is None:
+                qty = 0
             
             if qty <= 0:
                 # Nothing fulfilled for this item
@@ -90,12 +117,27 @@ class StockTransferService:
                     })
                 continue
 
-            # Get product sku
-            product = db.query(Product).filter(Product.id == item.product_id).first()
-            if not product:
-                continue
+            # Resolve source product in transfer.from_company_id
+            src_product = None
+            if product.company_id == transfer.from_company_id:
+                src_product = product
+            elif sku:
+                src_product = db.query(Product).filter(
+                    Product.sku == product.sku,
+                    Product.company_id == transfer.from_company_id
+                ).first()
 
+            src_prod_id = src_product.id if src_product else item.product_id
 
+            # Resolve destination product in transfer.to_company_id
+            dest_product = None
+            if product.company_id == transfer.to_company_id:
+                dest_product = product
+            elif sku:
+                dest_product = db.query(Product).filter(
+                    Product.sku == product.sku,
+                    Product.company_id == transfer.to_company_id
+                ).first()
 
             # ===== ADD to DESTINATION =====
             if transfer.destination_warehouse_id:
@@ -110,17 +152,41 @@ class StockTransferService:
             # ===== DEDUCT from SOURCE =====
             source_query = db.query(Inventory).filter(
                 Inventory.company_id == transfer.from_company_id,
-                Inventory.product_id == item.product_id
+                Inventory.product_id == src_prod_id
             )
-            if transfer.source_warehouse_id:
-                source_query = source_query.filter(Inventory.warehouse_id == transfer.source_warehouse_id)
+
+            # Warehouse pooling: For BKR (company 2), pool [39, 2] if source is 39, 2 or unspecified
+            wh_pool = None
+            if transfer.from_company_id == 2:
+                if not transfer.source_warehouse_id or transfer.source_warehouse_id in (39, 2):
+                    wh_pool = [39, 2]
+                else:
+                    wh_pool = [transfer.source_warehouse_id]
+            elif transfer.source_warehouse_id:
+                wh_pool = [transfer.source_warehouse_id]
+
+            if wh_pool:
+                source_query = source_query.filter(Inventory.warehouse_id.in_(wh_pool))
                 
             source_invs = source_query.with_for_update().all()
+            if wh_pool and 39 in wh_pool:
+                source_invs.sort(key=lambda inv: 0 if inv.warehouse_id == 39 else 1)
             
             requested_qty = qty
             total_available = sum((inv.current_qty - (inv.reserved_qty or 0)) for inv in source_invs)
+
+            # Fallback across all active warehouses of source company if stock is 0 in specified warehouse
+            if total_available <= 0 and wh_pool:
+                fallback_invs = db.query(Inventory).filter(
+                    Inventory.company_id == transfer.from_company_id,
+                    Inventory.product_id == src_prod_id
+                ).with_for_update().all()
+                fallback_avail = sum((inv.current_qty - (inv.reserved_qty or 0)) for inv in fallback_invs)
+                if fallback_avail > 0:
+                    source_invs = fallback_invs
+                    total_available = fallback_avail
             
-            print(f"[TRANSFER CHECK] Requested: {requested_qty}, Available: {total_available}")
+            print(f"[TRANSFER CHECK] SKU: {product.sku}, Requested: {requested_qty}, Available: {total_available}")
             
             if total_available < requested_qty and not allow_negative_stock:
                 raise ValueError(
@@ -140,7 +206,7 @@ class StockTransferService:
                 InventoryEventEngine.process_event(
                     db=db,
                     company_id=transfer.from_company_id,
-                    product_sku=product.sku,
+                    product_sku=src_product.sku if src_product else product.sku,
                     warehouse_id=src_inv.warehouse_id,
                     quantity=deduct_from_this,
                     event_type="TRANSFER_OUT",
@@ -148,26 +214,28 @@ class StockTransferService:
                     reference_id=transfer.transfer_number,
                     user_id=user_id,
                     metadata_payload={"destination_company_id": transfer.to_company_id},
-                    allow_negative=allow_negative_stock
+                    allow_negative_stock=allow_negative_stock
                 )
                 actual_deducted += deduct_from_this
                 remaining_deduct -= deduct_from_this
 
             # If remaining deficit and allow_negative_stock is True, deduct remaining from primary source warehouse
             if remaining_deduct > 0 and allow_negative_stock:
-                target_wh_id = transfer.source_warehouse_id
-                if not target_wh_id and source_invs:
+                target_wh_id = None
+                if source_invs:
                     target_wh_id = source_invs[0].warehouse_id
-                if not target_wh_id:
+                elif transfer.source_warehouse_id:
+                    target_wh_id = transfer.source_warehouse_id
+                else:
                     from app.api.routers.pos import _resolve_default_warehouse
                     sw = _resolve_default_warehouse(db, transfer.from_company_id)
-                    target_wh_id = sw.id if sw else None
+                    target_wh_id = sw.id if sw else (39 if transfer.from_company_id == 2 else None)
                 
                 if target_wh_id:
                     InventoryEventEngine.process_event(
                         db=db,
                         company_id=transfer.from_company_id,
-                        product_sku=product.sku,
+                        product_sku=src_product.sku if src_product else product.sku,
                         warehouse_id=target_wh_id,
                         quantity=remaining_deduct,
                         event_type="TRANSFER_OUT",
@@ -175,17 +243,18 @@ class StockTransferService:
                         reference_id=transfer.transfer_number,
                         user_id=user_id,
                         metadata_payload={"destination_company_id": transfer.to_company_id},
-                        allow_negative=True
+                        allow_negative_stock=True
                     )
                     actual_deducted += remaining_deduct
                     remaining_deduct = 0
 
             # ===== ADD to DESTINATION (JSPL) =====
             if actual_deducted > 0:
+                dest_sku = dest_product.sku if dest_product else product.sku
                 InventoryEventEngine.process_event(
                     db=db,
                     company_id=transfer.to_company_id,
-                    product_sku=product.sku,
+                    product_sku=dest_sku,
                     warehouse_id=dest_warehouse.id,
                     quantity=actual_deducted,
                     event_type="TRANSFER_IN",

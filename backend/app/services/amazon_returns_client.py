@@ -96,23 +96,35 @@ class SPAPIAmazonReturnsClient(AmazonReturnsClient):
             logger.info("Fetching completed FBA returns reports from Amazon SP-API...")
             fba_rep_res = reports_api.get_reports(
                 reportTypes=["GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA"],
-                processingStatuses=["DONE"],
                 pageSize=5
             )
-            fba_reports = (fba_rep_res.payload or {}).get("reports", [])
+            all_fba_reports = (fba_rep_res.payload or {}).get("reports", [])
+            fba_reports = [r for r in all_fba_reports if r.get("processingStatus") == "DONE"]
 
             # Check if we should request a fresh report
             should_create_fba = False
-            if not fba_reports:
+            if not all_fba_reports:
                 should_create_fba = True
             else:
-                newest_str = fba_reports[0].get("createdTime")
+                newest_str = all_fba_reports[0].get("createdTime")
                 if newest_str:
                     try:
                         from dateutil import parser as dt_parser
                         newest_dt = dt_parser.isoparse(newest_str)
-                        if datetime.now(timezone.utc) - newest_dt > timedelta(hours=12):
+                        if datetime.now(timezone.utc) - newest_dt > timedelta(hours=6):
                             should_create_fba = True
+                        elif all_fba_reports[0].get("processingStatus") in ["IN_QUEUE", "IN_PROGRESS"]:
+                            # Wait briefly for in-progress report
+                            rep_id = all_fba_reports[0].get("reportId")
+                            for _ in range(6):
+                                time.sleep(5)
+                                st = reports_api.get_report(rep_id)
+                                st_payload = st.payload or {}
+                                if st_payload.get("processingStatus") == "DONE":
+                                    fba_reports.insert(0, st_payload)
+                                    break
+                                elif st_payload.get("processingStatus") in ["FATAL", "CANCELLED"]:
+                                    break
                     except Exception:
                         pass
 
@@ -217,23 +229,34 @@ class SPAPIAmazonReturnsClient(AmazonReturnsClient):
             logger.info("Fetching completed MFN returns reports from Amazon SP-API...")
             mfn_rep_res = reports_api.get_reports(
                 reportTypes=["GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE"],
-                processingStatuses=["DONE"],
                 pageSize=5
             )
-            mfn_reports = (mfn_rep_res.payload or {}).get("reports", [])
+            all_mfn_reports = (mfn_rep_res.payload or {}).get("reports", [])
+            mfn_reports = [r for r in all_mfn_reports if r.get("processingStatus") == "DONE"]
 
             # Check if we should request a fresh MFN returns report
             should_create_mfn = False
-            if not mfn_reports:
+            if not all_mfn_reports:
                 should_create_mfn = True
             else:
-                newest_str = mfn_reports[0].get("createdTime")
+                newest_str = all_mfn_reports[0].get("createdTime")
                 if newest_str:
                     try:
                         from dateutil import parser as dt_parser
                         newest_dt = dt_parser.isoparse(newest_str)
-                        if datetime.now(timezone.utc) - newest_dt > timedelta(hours=12):
+                        if datetime.now(timezone.utc) - newest_dt > timedelta(hours=6):
                             should_create_mfn = True
+                        elif all_mfn_reports[0].get("processingStatus") in ["IN_QUEUE", "IN_PROGRESS"]:
+                            rep_id = all_mfn_reports[0].get("reportId")
+                            for _ in range(6):
+                                time.sleep(5)
+                                st = reports_api.get_report(rep_id)
+                                st_payload = st.payload or {}
+                                if st_payload.get("processingStatus") == "DONE":
+                                    mfn_reports.insert(0, st_payload)
+                                    break
+                                elif st_payload.get("processingStatus") in ["FATAL", "CANCELLED"]:
+                                    break
                     except Exception:
                         pass
 

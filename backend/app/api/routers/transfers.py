@@ -337,25 +337,40 @@ def get_transfer(transfer_id: int, db: Session = Depends(get_db), current_user: 
         
     items = []
     for item in transfer.items:
+        # Cross-company SKU resolution: ensure available stock is checked for source company product
+        src_product = None
+        sku = item.product.sku if item.product else None
+        if item.product and item.product.company_id == transfer.from_company_id:
+            src_product = item.product
+        elif sku:
+            src_product = db.query(Product).filter(
+                Product.sku == sku,
+                Product.company_id == transfer.from_company_id
+            ).first()
+
+        src_prod_id = src_product.id if src_product else item.product_id
+
         # Aggregate available stock across ALL warehouses for the source company
         total_available = db.query(
             func.sum(Inventory.available_qty)
         ).filter(
             Inventory.company_id == transfer.from_company_id,
-            Inventory.product_id == item.product_id
+            Inventory.product_id == src_prod_id
         ).scalar() or 0
         
+        display_prod = src_product or item.product
         items.append({
             "id": item.id,
-            "product_id": item.product_id,
-            "sku": item.product.sku if item.product else "",
-            "product_sku": item.product.sku if item.product else "",
-            "product_name": item.product.name if item.product else "",
-            "product": item.product.name if item.product else "",
-            "hsn_sac": item.product.hsn if item.product else "",
-            "gst_rate": item.product.default_gst_rate if item.product else 18.0,
+            "product_id": src_prod_id,
+            "destination_product_id": item.product_id if item.product_id != src_prod_id else None,
+            "sku": display_prod.sku if display_prod else "",
+            "product_sku": display_prod.sku if display_prod else "",
+            "product_name": display_prod.name if display_prod else "",
+            "product": display_prod.name if display_prod else "",
+            "hsn_sac": display_prod.hsn if display_prod else "",
+            "gst_rate": display_prod.default_gst_rate if display_prod and display_prod.default_gst_rate is not None else 18.0,
             "requested_qty": item.requested_qty,
-            "unit_price": item.product.item_rate if item.product else 0,
+            "unit_price": item.unit_price or (display_prod.item_rate if display_prod else 0),
             "available_qty": total_available
         })
         
@@ -365,6 +380,8 @@ def get_transfer(transfer_id: int, db: Session = Depends(get_db), current_user: 
         "status": transfer.status,
         "from_company_id": transfer.from_company_id,
         "to_company_id": transfer.to_company_id,
+        "source_warehouse_id": transfer.source_warehouse_id,
+        "destination_warehouse_id": transfer.destination_warehouse_id,
         "items": items
     }
 

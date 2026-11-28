@@ -179,7 +179,7 @@ class SPAPIAmazonClient(AmazonClient):
             return all_orders
         except Exception as e:
             logger.error(f"Failed to fetch orders from SP-API: {e}", exc_info=True)
-            return []
+            raise e
 
     def request_and_download_shipment_report(self, start_date: datetime, end_date: datetime = None) -> str:
         """

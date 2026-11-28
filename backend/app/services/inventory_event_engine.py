@@ -25,11 +25,15 @@ class InventoryEventEngine:
         reference_id: str,
         user_id: Optional[int] = None,
         metadata_payload: Optional[dict] = None,
-        allow_negative_stock: bool = False
+        allow_negative_stock: bool = False,
+        allow_negative: Optional[bool] = None
     ) -> InventoryMovement:
         """
         The single source of truth for all inventory modifications.
         """
+        if allow_negative is not None:
+            allow_negative_stock = bool(allow_negative)
+
         # 1. Enforce Idempotency Key (Operation ID)
         actual_metadata = metadata_payload or {}
         op_id = actual_metadata.get("operation_id")
@@ -424,7 +428,7 @@ class InventoryEventEngine:
             c_id = ev["company_id"]
             wh_id = ev["warehouse_id"]
             ev_type = ev["event_type"]
-            allow_negative = ev.get("allow_negative_stock", False)
+            allow_negative = ev.get("allow_negative_stock", False) or ev.get("allow_negative", False)
 
             inv = inv_map[(c_id, wh_id, prod.id)]
             qty_before = inv.current_qty
