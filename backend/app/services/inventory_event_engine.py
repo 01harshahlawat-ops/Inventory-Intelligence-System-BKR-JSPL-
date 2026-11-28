@@ -188,7 +188,8 @@ class InventoryEventEngine:
                 inventory.available_qty = inventory.current_qty - (inventory.reserved_qty or 0)
                 
                 # Enforce available_qty >= 0 (unless allow_negative_stock is True)
-                if inventory.available_qty < 0 and not allow_negative_stock and qty_changed <= 0:
+                is_addition_or_unreserve = qty_changed > 0 or event_type in ("ADD", "OPENING_BALANCE", "RETURN", "TRANSFER_IN", "RESTOCK", "UNRESERVE")
+                if inventory.available_qty < 0 and not allow_negative_stock and not is_addition_or_unreserve:
                     print(f"[NEGATIVE STOCK ATTEMPT] product_sku={product_sku}, available_qty is negative, requested={quantity}, allowed_flag={allow_negative_stock}")
                     raise ValueError(f"Insufficient stock for {product_sku}: cannot deduct {quantity} because available stock would drop below zero")
                 
@@ -458,7 +459,8 @@ class InventoryEventEngine:
                 raise ValueError(f"Unknown event_type: {ev_type}")
 
             inv.available_qty = inv.current_qty - (inv.reserved_qty or 0)
-            if inv.available_qty < 0 and not allow_negative:
+            is_addition_or_unreserve = qty_changed > 0 or ev_type in ("ADD", "OPENING_BALANCE", "RETURN", "TRANSFER_IN", "RESTOCK", "UNRESERVE")
+            if inv.available_qty < 0 and not allow_negative and not is_addition_or_unreserve:
                 inv._allow_mutation = False
                 raise ValueError(f"Insufficient stock for {prod.sku}: cannot deduct {qty} because available stock would drop below zero")
 
